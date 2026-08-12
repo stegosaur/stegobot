@@ -282,9 +282,7 @@ def _register_routes(app):
     def terminal():
         channels = db.chan_list()
         active   = request.args.get('chan', channels[0] if channels else '#fmc')
-        history  = list(reversed(list(db.log_recent(active, 100))))
-        return render_template('terminal.html',
-                               channels=channels, active=active, history=history)
+        return render_template('terminal.html', channels=channels, active=active)
 
     # ── SocketIO events ────────────────────────────────────────────────────
 
