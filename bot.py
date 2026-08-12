@@ -129,6 +129,14 @@ class StegoBot:
             ('privnotice',    self._on_notice),
             ('nicknameinuse',      self._on_nick_in_use),
             ('cannotsendtochan',   self._on_cannotsendtochan),
+            ('chanoprivsneeded',   self._on_chanoprivsneeded),
+            ('banlist',            self._on_banlist),
+            ('endofbanlist',       self._on_endofbanlist),
+            ('channelmodeis',      self._on_channelmodeis),
+            ('exceptlist',         self._on_exceptlist),
+            ('endofexceptlist',    self._on_endofexceptlist),
+            ('invitelist',         self._on_invitelist),
+            ('endofinvitelist',    self._on_endofinvitelist),
             ('disconnect',         self._on_disconnect),
             ('error',              self._on_error),
             ('all_raw_messages',   self._on_raw_numeric),
@@ -145,8 +153,13 @@ class StegoBot:
             '311','312','313','317','318','319',  # WHOIS
             '330',                                # WHOIS account
             '372','375','376',                    # MOTD
+            '324',                                # channelmodeis
+            '346','347',                          # invitelist / endofinvitelist
+            '348','349',                          # exceptlist / endofexceptlist
+            '367','368',                          # banlist / endofbanlist
             '433',                                # nick in use
-            '404',                                # cannotsendtochan (handled separately)
+            '404',                                # cannotsendtochan
+            '482',                                # chanoprivsneeded
             '421',                                # unknown command (swallow)
         }
 
@@ -662,7 +675,56 @@ class StegoBot:
         db.user_add(hostmask, level)
         self._safe_privmsg(reply_target, f'Added {hostmask} as {level}.')
 
+    # ── Mode list / query numeric replies ─────────────────────────────────────
+
+    def _on_banlist(self, c, e):
+        channel = (e.arguments[0] if e.arguments else '').lower()
+        mask    = e.arguments[1] if len(e.arguments) > 1 else ''
+        setter  = e.arguments[2] if len(e.arguments) > 2 else ''
+        info    = mask + (f'  (set by {setter})' if setter else '')
+        if channel:
+            _push(channel, {'type': 'server', 'nick': '', 'text': f'Ban: {info}', 'timestamp': _now()})
+
+    def _on_endofbanlist(self, c, e):
+        channel = (e.arguments[0] if e.arguments else '').lower()
+        if channel:
+            _push(channel, {'type': 'server', 'nick': '', 'text': 'End of ban list.', 'timestamp': _now()})
+
+    def _on_channelmodeis(self, c, e):
+        channel = (e.arguments[0] if e.arguments else '').lower()
+        modes   = ' '.join(e.arguments[1:]) if len(e.arguments) > 1 else ''
+        if channel:
+            _push(channel, {'type': 'server', 'nick': '', 'text': f'Mode {channel}: {modes}', 'timestamp': _now()})
+
+    def _on_exceptlist(self, c, e):
+        channel = (e.arguments[0] if e.arguments else '').lower()
+        mask    = e.arguments[1] if len(e.arguments) > 1 else ''
+        if channel:
+            _push(channel, {'type': 'server', 'nick': '', 'text': f'Exception: {mask}', 'timestamp': _now()})
+
+    def _on_endofexceptlist(self, c, e):
+        channel = (e.arguments[0] if e.arguments else '').lower()
+        if channel:
+            _push(channel, {'type': 'server', 'nick': '', 'text': 'End of exception list.', 'timestamp': _now()})
+
+    def _on_invitelist(self, c, e):
+        channel = (e.arguments[0] if e.arguments else '').lower()
+        mask    = e.arguments[1] if len(e.arguments) > 1 else ''
+        if channel:
+            _push(channel, {'type': 'server', 'nick': '', 'text': f'Invite: {mask}', 'timestamp': _now()})
+
+    def _on_endofinvitelist(self, c, e):
+        channel = (e.arguments[0] if e.arguments else '').lower()
+        if channel:
+            _push(channel, {'type': 'server', 'nick': '', 'text': 'End of invite list.', 'timestamp': _now()})
+
     # ── Error numerics ────────────────────────────────────────────────────────
+
+    def _on_chanoprivsneeded(self, c, e):
+        channel = (e.arguments[0] if e.arguments else '').lower()
+        msg     = e.arguments[1] if len(e.arguments) > 1 else "You're not channel operator"
+        if channel:
+            _push(channel, {'type': 'error', 'nick': '', 'text': msg, 'timestamp': _now()})
 
     def _on_cannotsendtochan(self, c, e):
         channel = (e.arguments[0] if e.arguments else '').lower()
