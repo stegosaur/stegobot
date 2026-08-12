@@ -19,11 +19,11 @@ db.init_schema()
 # ── Config defaults ──────────────────────────────────────────────────────────
 
 DEFAULTS = {
-    'nick':         os.environ.get('STEGOBOT_NICK', 'steg0saur'),
-    'altNick':      os.environ.get('STEGOBOT_ALTNICK', 'stegOsaur'),
-    'username':     os.environ.get('STEGOBOT_USERNAME', 'stegosaur'),
-    'realname':     os.environ.get('STEGOBOT_REALNAME', 'stegosaur'),
-    'ctcp_version': os.environ.get('STEGOBOT_CTCP_VERSION', 'irssi v1.4.3 - https://irssi.org'),
+    'nick':         os.environ.get('STEGOBOT_NICK', 'stegobot'),
+    'altNick':      os.environ.get('STEGOBOT_ALTNICK', 'steg0bot'),
+    'username':     os.environ.get('STEGOBOT_USERNAME', 'stegobot'),
+    'realname':     os.environ.get('STEGOBOT_REALNAME', 'stegobot'),
+    'ctcp_version': os.environ.get('STEGOBOT_CTCP_VERSION', 'stegobot'),
     'web_port':     os.environ.get('STEGOBOT_WEB_PORT', '8080'),
     'admin_email':  os.environ.get('STEGOBOT_ADMIN_EMAIL', ''),
     # SMTP — no defaults; leave unset until configured (install prompt or web config page)

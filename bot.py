@@ -156,9 +156,9 @@ class StegoBot:
             host, port = db.srv_next()
         if port is None:
             port = 6667
-        self.nick     = db.cfg_get('nick', 'steg0saur')
-        username      = db.cfg_get('username', 'stegosaur')
-        realname      = db.cfg_get('realname', 'stegosaur')
+        self.nick     = db.cfg_get('nick', 'stegobot')
+        username      = db.cfg_get('username', 'stegobot')
+        realname      = db.cfg_get('realname', 'stegobot')
         logger.info('Connecting to %s:%s as %s!%s', host, port, self.nick, username)
         db.srv_rotate(host)
         _push('*status*', {'type': 'connect', 'nick': '', 'text': f'Connecting to {host}:{port}…', 'timestamp': _now()})
@@ -284,7 +284,7 @@ class StegoBot:
         cmd  = e.arguments[0].upper() if e.arguments else ''
         args = e.arguments[1] if len(e.arguments) > 1 else ''
         if cmd == 'VERSION':
-            ver = db.cfg_get('ctcp_version', 'irssi v1.4.3 - https://irssi.org')
+            ver = db.cfg_get('ctcp_version', 'stegobot')
             c.ctcp_reply(nick, f'VERSION {ver}')
         _push('*status*', {'type': 'ctcp', 'nick': nick, 'hostmask': hm,
                             'text': f'CTCP {cmd} from {nick} ({hm}){": " + args if args else ""}',
@@ -531,7 +531,7 @@ class StegoBot:
 
     def _on_nick_in_use(self, c, e):
         requested = e.arguments[0] if e.arguments else '?'
-        alt = db.cfg_get('altNick', 'stegOsaur')
+        alt = db.cfg_get('altNick', 'steg0bot')
         if self.nick != alt:
             self.nick = alt
             c.nick(alt)

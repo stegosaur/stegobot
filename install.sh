@@ -43,8 +43,8 @@ if [ ! -f "$INSTALL_DIR/stegobot.db" ]; then
   if [ -t 0 ]; then
     echo ""
     echo "-- Initial bot configuration (press Enter to accept the default) --"
-    read -rp "Bot nick [steg0saur]: " STEGOBOT_NICK
-    read -rp "Alt nick [stegOsaur]: " STEGOBOT_ALTNICK
+    read -rp "Bot nick [stegobot]: " STEGOBOT_NICK
+    read -rp "Alt nick [steg0bot]: " STEGOBOT_ALTNICK
     read -rp "Admin email (for web UI login): " STEGOBOT_ADMIN_EMAIL
     read -rp "Admin hostmask (e.g. *!*@yourhost.example.com): " STEGOBOT_ADMIN_HOSTMASK
     read -rp "Channels to auto-join, comma separated (e.g. #chan1,#chan2): " STEGOBOT_CHANNELS
