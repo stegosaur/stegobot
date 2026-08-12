@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}StegoBot — Login{% endblock %}
+{% block content %}
+<div class="login-box">
+  <h1>⚡ StegoBot</h1>
+  <p>Enter your admin email address to receive a one-time login link.</p>
+  {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
+  <form method="post">
+    <input type="email" name="email" placeholder="admin@example.com"
+           autofocus required>
+    <button type="submit">Send login link</button>
+  </form>
+</div>
+{% endblock %}

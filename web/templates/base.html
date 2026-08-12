@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}StegoBot{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+{% block head %}{% endblock %}
+</head>
+<body>
+{% if session.email %}
+<nav>
+  <span class="brand">⚡ StegoBot</span>
+  <a href="{{ url_for('config_page') }}" {% if request.endpoint=='config_page' %}class="active"{% endif %}>Config</a>
+  <a href="{{ url_for('terminal') }}"   {% if request.endpoint=='terminal'     %}class="active"{% endif %}>Terminal</a>
+  <a href="{{ url_for('logout') }}" class="logout">Logout</a>
+</nav>
+{% endif %}
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

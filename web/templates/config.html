@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}StegoBot — Config{% endblock %}
+{% block content %}
+{% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
+
+<h2>Configuration</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>Key</th><th>Value</th><th></th></tr></thead>
+    <tbody>
+    {% for k,v in config.items() %}
+    <tr>
+      <td><code>{{ k }}</code></td>
+      <td>{{ '*' * (v|length) if 'pass' in k.lower() or 'secret' in k.lower() else v }}</td>
+      <td>
+        <form method="post" style="display:inline">
+          <input type="hidden" name="action" value="delete">
+          <input type="hidden" name="key" value="{{ k }}">
+          <button class="btn-danger btn-sm">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" class="inline-form">
+    <input type="hidden" name="action" value="set">
+    <input type="text"  name="key"   placeholder="key"   required>
+    <input type="text"  name="value" placeholder="value" required>
+    <button>Set</button>
+  </form>
+</div>
+
+<h2>Users</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>Hostmask</th><th>Level</th><th>Added</th><th></th></tr></thead>
+    <tbody>
+    {% for u in users %}
+    <tr>
+      <td><code>{{ u.hostmask }}</code></td>
+      <td><span class="badge badge-{{ u.level }}">{{ u.level }}</span></td>
+      <td>{{ u.created_at[:10] }}</td>
+      <td>
+        <form method="post" action="{{ url_for('del_user') }}" style="display:inline">
+          <input type="hidden" name="hostmask" value="{{ u.hostmask }}">
+          <button class="btn-danger btn-sm">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="{{ url_for('add_user') }}" class="inline-form">
+    <input type="text" name="hostmask" placeholder="*!*@*.example.com" required>
+    <select name="level"><option>peon</option><option>admin</option></select>
+    <button>Add user</button>
+  </form>
+</div>
+
+<h2>Channels</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>Channel</th><th>Topic</th><th>Users</th><th>First joined</th><th></th></tr></thead>
+    <tbody>
+    {% for ch in channels %}
+    <tr>
+      <td><code>{{ ch.name }}</code></td>
+      <td>{{ ch.currentTopic or '' }}</td>
+      <td>{{ ch.num_users }}</td>
+      <td>{{ (ch.first_joined or '')[:10] }}</td>
+      <td>
+        <form method="post" action="{{ url_for('del_channel') }}" style="display:inline">
+          <input type="hidden" name="name" value="{{ ch.name }}">
+          <button class="btn-danger btn-sm">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="{{ url_for('add_channel') }}" class="inline-form">
+    <input type="text" name="name" placeholder="#channel" required>
+    <button>Join &amp; add</button>
+  </form>
+</div>
+
+<h2>Servers</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>Priority</th><th>Host</th><th>Port</th><th></th></tr></thead>
+    <tbody>
+    {% for s in servers %}
+    <tr>
+      <td>{{ s.priority }}</td>
+      <td><code>{{ s.host }}</code></td>
+      <td>{{ s.port }}</td>
+      <td>
+        <form method="post" action="{{ url_for('del_server') }}" style="display:inline">
+          <input type="hidden" name="host" value="{{ s.host }}">
+          <button class="btn-danger btn-sm">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="{{ url_for('add_server') }}" class="inline-form">
+    <input type="text"   name="host" placeholder="irc.example.com" required>
+    <input type="number" name="port" placeholder="6667" value="6667" style="width:80px">
+    <button>Add server</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,21 @@
+[Unit]
+Description=StegoBot IRC bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stegobot
+Group=stegobot
+WorkingDirectory=/opt/stegobot
+ExecStart=/opt/stegobot/venv/bin/python3 stegobot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stegobot
+# Prevent the process from gaining new privileges
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
