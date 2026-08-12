@@ -128,10 +128,11 @@ class StegoBot:
             ('endofmotd',     self._on_endofmotd),
             ('notice',        self._on_notice),
             ('privnotice',    self._on_notice),
-            ('nicknameinuse', self._on_nick_in_use),
-            ('disconnect',    self._on_disconnect),
-            ('error',         self._on_error),
-            ('all_raw_messages', self._on_raw_numeric),
+            ('nicknameinuse',      self._on_nick_in_use),
+            ('cannotsendtochan',   self._on_cannotsendtochan),
+            ('disconnect',         self._on_disconnect),
+            ('error',              self._on_error),
+            ('all_raw_messages',   self._on_raw_numeric),
         ]
         for evt, fn in handlers:
             self.reactor.add_global_handler(evt, fn)
@@ -146,6 +147,7 @@ class StegoBot:
             '330',                                # WHOIS account
             '372','375','376',                    # MOTD
             '433',                                # nick in use
+            '404',                                # cannotsendtochan (handled separately)
             '421',                                # unknown command (swallow)
         }
 
@@ -660,6 +662,21 @@ class StegoBot:
     def _adduser_cb(self, hostmask, reply_target, level):
         db.user_add(hostmask, level)
         self._safe_privmsg(reply_target, f'Added {hostmask} as {level}.')
+
+    # ── Error numerics ────────────────────────────────────────────────────────
+
+    def _on_cannotsendtochan(self, c, e):
+        channel = (e.arguments[0] if e.arguments else '').lower()
+        reason  = e.arguments[1] if len(e.arguments) > 1 else 'Cannot send to channel'
+        if not channel:
+            return
+        _push(channel, {
+            'type':      'error',
+            'nick':      '',
+            'text':      f'Channel is moderated (+m) — message not sent: {reason}',
+            'channel':   channel,
+            'timestamp': _now(),
+        })
 
     # ── Catch-all for server numeric replies ─────────────────────────────────
 
