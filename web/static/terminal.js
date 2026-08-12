@@ -166,7 +166,7 @@ function switchWin(name) {
   setTimeout(() => { w.fit.fit(); w.term.scrollToBottom(); }, 10);
 
   // Update UI
-  document.getElementById('topic-bar').textContent = w.topic || name;
+  document.getElementById('topic-bar').textContent = w.topic ? `${name}  —  ${w.topic}` : name;
   document.getElementById('input-prompt').textContent = `[${name}]`;
   document.querySelectorAll('.win-item').forEach(el => {
     el.classList.toggle('active', el.dataset.win === name);
@@ -392,7 +392,7 @@ function connectSocket() {
     if (e.type === 'names_update') { updateUsers(target, e.users || []); return; }
     if (e.type === 'topic_update') {
       const w = wins.get(target);
-      if (w) { w.topic = e.topic || ''; if (target === activeWin) document.getElementById('topic-bar').textContent = w.topic; }
+      if (w) { w.topic = e.topic || ''; if (target === activeWin) document.getElementById('topic-bar').textContent = w.topic ? `${target}  —  ${w.topic}` : target; }
       return;
     }
 

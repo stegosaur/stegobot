@@ -52,15 +52,6 @@ def init_schema():
             priority INTEGER DEFAULT 0
         );
 
-        CREATE TABLE IF NOT EXISTS irc_log (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            channel   TEXT NOT NULL,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            nick      TEXT NOT NULL,
-            message   TEXT NOT NULL,
-            type      TEXT DEFAULT 'privmsg'
-        );
-
         CREATE TABLE IF NOT EXISTS web_sessions (
             token      TEXT PRIMARY KEY,
             email      TEXT NOT NULL,
@@ -189,23 +180,6 @@ def srv_add(host, port=6667):
 def srv_delete(host):
     _conn().execute('DELETE FROM servers WHERE host=?', (host.lower(),))
     _conn().commit()
-
-
-# ── Logging ─────────────────────────────────────────────────────────────────
-
-def log_msg(channel, nick, message, kind='privmsg'):
-    _conn().execute(
-        'INSERT INTO irc_log(channel,nick,message,type) VALUES(?,?,?,?)',
-        (channel, nick, message, kind)
-    )
-    _conn().commit()
-
-
-def log_recent(channel, limit=200):
-    return _conn().execute(
-        'SELECT timestamp,nick,message,type FROM irc_log WHERE channel=? ORDER BY id DESC LIMIT ?',
-        (channel, limit)
-    ).fetchall()
 
 
 # ── Web sessions ─────────────────────────────────────────────────────────────

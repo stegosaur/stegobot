@@ -433,8 +433,14 @@ def _handle_terminal_command(bot, text, default_channel):
     elif cmd == 'whois' and len(parts) >= 2:
         bot.web_whois(parts[1], default_channel)
     elif cmd == 'mode' and len(parts) >= 2:
-        mode_parts = parts[1].split(None, 1)
-        bot.web_mode(default_channel, mode_parts[0], mode_parts[1] if len(mode_parts) > 1 else '')
+        if parts[1].startswith('#'):
+            target = parts[1].lower()
+            rest   = parts[2] if len(parts) >= 3 else ''
+        else:
+            target = default_channel
+            rest   = ' '.join(parts[1:])
+        mode_parts = rest.split(None, 1) if rest else []
+        bot.web_mode(target, mode_parts[0] if mode_parts else '', mode_parts[1] if len(mode_parts) > 1 else '')
     elif cmd == 'raw' and len(parts) >= 2:
         bot._conn.send_raw(parts[1] if len(parts) >= 2 else '')
     else:

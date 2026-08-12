@@ -67,7 +67,6 @@ def _push(channel, entry):
     nick = entry.get('nick') or ''
     text = entry.get('text') or ''
     ChannelLog.write(channel, f"[{ts}] {entry.get('type','?')} {nick} {text}")
-    db.log_msg(channel, entry.get('nick', ''), entry.get('text', ''), entry.get('type', 'raw'))
     state.buffer_push(channel, entry)
 
 
@@ -682,14 +681,24 @@ class StegoBot:
 
     def _on_raw_numeric(self, c, e):
         raw = e.arguments[0] if e.arguments else ''
-        tokens = raw.split(' ', 3)
+        # :server NUMERIC botnick [#channel] [rest...]
+        tokens = raw.split(' ', 4)
         if len(tokens) < 2:
             return
         numeric = tokens[1]
         if not numeric.isdigit() or numeric in self._handled_numerics:
             return
-        text = tokens[3].lstrip(':') if len(tokens) > 3 else (tokens[2] if len(tokens) > 2 else raw)
-        _push('*status*', {'type': 'server', 'nick': '', 'text': f'[{numeric}] {text}', 'timestamp': _now()})
+        # tokens[3] is the first payload token (after server + numeric + botnick)
+        payload = tokens[3:]
+        channel = None
+        if payload and payload[0].startswith('#'):
+            channel = payload[0].lower()
+            rest = payload[1].lstrip(':') if len(payload) > 1 else ''
+        else:
+            rest = ' '.join(p.lstrip(':') for p in payload)
+        text   = f'[{numeric}] {rest}' if rest else f'[{numeric}]'
+        target = channel or '*status*'
+        _push(target, {'type': 'server', 'nick': '', 'text': text, 'timestamp': _now()})
 
     # ── Web-initiated actions ─────────────────────────────────────────────────
 
