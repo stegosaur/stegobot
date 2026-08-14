@@ -23,7 +23,17 @@ logger = logging.getLogger('stegobot')
 # ── Channel file logger ───────────────────────────────────────────────────────
 
 class ChannelLog:
-    _handles = {}
+    """Open, append, close on every write rather than caching a handle per channel.
+
+    The previous version cached one open file handle per channel forever (only
+    closed on midnight rollover). Every distinct query window is its own
+    "channel" now (see _on_privmsg), so anyone who ever DMs the bot would pin
+    an open fd for the rest of the process's life — that's exactly what
+    exhausted the process's file descriptor limit and killed the bot before
+    (`OSError: Too many open files`). Log write volume here is far too low for
+    open+append+close per line to matter, and it makes fd exhaustion
+    structurally impossible instead of just less likely.
+    """
     _lock = threading.Lock()
     _last_date = {}
 
@@ -36,22 +46,14 @@ class ChannelLog:
             if prev is not None and prev != today:
                 # Real date rollover — compress yesterday's log
                 cls._rotate(safe, prev)
-            if prev != today:
-                cls._last_date[safe] = today
-            fh = cls._handles.get(safe)
-            if fh is None or fh.closed:
-                path = LOG_DIR / f'{safe}_{today}.log'
-                fh = open(path, 'a', encoding='utf-8')
-                cls._handles[safe] = fh
-            fh.write(line + '\n')
-            fh.flush()
+            cls._last_date[safe] = today
+            path = LOG_DIR / f'{safe}_{today}.log'
+            with open(path, 'a', encoding='utf-8') as fh:
+                fh.write(line + '\n')
 
     @classmethod
     def _rotate(cls, safe, date_str):
-        """Compress the log for date_str and close the file handle."""
-        fh = cls._handles.pop(safe, None)
-        if fh:
-            fh.close()
+        """Compress the log for date_str."""
         p = LOG_DIR / f'{safe}_{date_str}.log'
         if p.exists():
             gz = p.with_suffix('.log.gz')
@@ -84,6 +86,10 @@ class StegoBot:
         self.nick = ''
         self.should_stop = False
         self.reconnect_requested = None  # (host, port)
+        self._manual_disconnect = False  # True while a /disconnect should not auto-reconnect
+
+        # LIST accumulator (322 rows collected between 321 liststart / 323 listend)
+        self.list_acc = []
 
         # User tracking: channel -> {nick_lower: {nick, prefix, hostmask}}
         self.channel_users = defaultdict(dict)
@@ -137,6 +143,9 @@ class StegoBot:
             ('endofexceptlist',    self._on_endofexceptlist),
             ('invitelist',         self._on_invitelist),
             ('endofinvitelist',    self._on_endofinvitelist),
+            ('liststart',          self._on_liststart),
+            ('list',               self._on_list),
+            ('listend',            self._on_listend),
             ('disconnect',         self._on_disconnect),
             ('error',              self._on_error),
             ('all_raw_messages',   self._on_raw_numeric),
@@ -157,6 +166,7 @@ class StegoBot:
             '346','347',                          # invitelist / endofinvitelist
             '348','349',                          # exceptlist / endofexceptlist
             '367','368',                          # banlist / endofbanlist
+            '321','322','323',                    # LIST — handled, rendered as a table window
             '433',                                # nick in use
             '404',                                # cannotsendtochan
             '482',                                # chanoprivsneeded
@@ -170,6 +180,7 @@ class StegoBot:
             host, port = db.srv_next()
         if port is None:
             port = 6667
+        self._manual_disconnect = False
         self.nick     = db.cfg_get('nick', 'stegobot')
         username      = db.cfg_get('username', 'stegobot')
         realname      = db.cfg_get('realname', 'stegobot')
@@ -282,8 +293,12 @@ class StegoBot:
     def _on_privmsg(self, c, e):
         nick, hm = self._mask(e.source)
         text     = e.arguments[0]
-        _push('privmsg', {'type': 'privmsg', 'nick': nick, 'hostmask': hm, 'text': text,
-                           'channel': 'privmsg', 'timestamp': _now()})
+        # Keyed by the sender's nick (a query window per correspondent), matching
+        # web_privmsg's outgoing target — previously this was a single shared
+        # 'privmsg' bucket that merged every correspondent into one window.
+        target   = nick.lower()
+        _push(target, {'type': 'privmsg', 'nick': nick, 'hostmask': hm, 'text': text,
+                        'channel': target, 'timestamp': _now()})
         self._dispatch(c, text, channel=None, source=str(e.source), public=False, reply_to=nick)
 
     def _on_action(self, c, e):
@@ -559,7 +574,7 @@ class StegoBot:
         reason = e.arguments[0] if e.arguments else ''
         logger.warning('Disconnected: %s', reason)
         _push('*status*', {'type': 'disconnect', 'nick': '', 'text': f'Disconnected: {reason}', 'timestamp': _now()})
-        if not self.should_stop:
+        if not self.should_stop and not self._manual_disconnect:
             time.sleep(15)
             self._try_next()
 
@@ -707,6 +722,28 @@ class StegoBot:
         if channel:
             _push(channel, {'type': 'server', 'nick': '', 'text': 'End of exception list.', 'timestamp': _now()})
 
+    def _on_liststart(self, c, e):
+        self.list_acc = []
+        state.buffer_push('*list*', {'type': 'list_start', 'channel': '*list*', 'timestamp': _now()})
+
+    def _on_list(self, c, e):
+        # args: [channel, num_users, topic]
+        if len(e.arguments) < 2:
+            return
+        channel = e.arguments[0]
+        users   = e.arguments[1]
+        topic   = e.arguments[2] if len(e.arguments) > 2 else ''
+        self.list_acc.append({
+            'channel': channel,
+            'users': int(users) if str(users).isdigit() else 0,
+            'topic': topic,
+        })
+
+    def _on_listend(self, c, e):
+        state.buffer_push('*list*', {'type': 'list_result', 'channel': '*list*',
+                                      'channels': self.list_acc, 'timestamp': _now()})
+        self.list_acc = []
+
     def _on_invitelist(self, c, e):
         channel = (e.arguments[0] if e.arguments else '').lower()
         mask    = e.arguments[1] if len(e.arguments) > 1 else ''
@@ -793,3 +830,51 @@ class StegoBot:
     def web_raw(self, raw):
         if self._conn and self._conn.is_connected():
             self._conn.send_raw(raw)
+
+    def web_whois_idle(self, nick, reply_channel):
+        """WHOIS with the nick repeated as both target and mask (irssi's /WII trick) —
+        this forces a remote-routed lookup that includes idle/signon time even for
+        servers that omit it from a plain single-argument WHOIS."""
+        self.whois_web[nick.lower()] = reply_channel
+        if self._conn and self._conn.is_connected():
+            self._conn.send_raw(f'WHOIS {nick} {nick}')
+
+    def web_disconnect(self, msg='Disconnected via web'):
+        self._manual_disconnect = True
+        if self._conn and self._conn.is_connected():
+            self._conn.quit(msg)
+        else:
+            _push('*status*', {'type': 'disconnect', 'nick': '', 'text': 'Already disconnected.', 'timestamp': _now()})
+
+    def web_reconnect(self):
+        self._manual_disconnect = False
+        if self._conn and self._conn.is_connected():
+            host, port = db.srv_next()
+            self.reconnect_requested = (host, port)
+        else:
+            self.connect()
+
+    def web_privmsg(self, target, text):
+        """Send a PRIVMSG from the web UI.
+
+        IRC servers do not echo your own PRIVMSGs back to you, so unlike every
+        other event in this file, nothing will call `_push` for this unless we
+        do it here — that's the "self-sent messages aren't logged" bug.
+        """
+        if not (self._conn and self._conn.is_connected()):
+            return False
+        self._conn.privmsg(target, text)
+        hm = self.hostmask_cache.get(self.nick.lower(), '')
+        _push(target.lower(), {'type': 'privmsg', 'nick': self.nick, 'hostmask': hm,
+                                'text': text, 'channel': target.lower(), 'timestamp': _now()})
+        return True
+
+    def web_action(self, target, text):
+        """Send a CTCP ACTION (/me) from the web UI and log it, same reasoning as web_privmsg."""
+        if not (self._conn and self._conn.is_connected()):
+            return False
+        self._conn.action(target, text)
+        hm = self.hostmask_cache.get(self.nick.lower(), '')
+        _push(target.lower(), {'type': 'action', 'nick': self.nick, 'hostmask': hm,
+                                'text': text, 'channel': target.lower(), 'timestamp': _now()})
+        return True

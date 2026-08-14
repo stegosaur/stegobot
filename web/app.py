@@ -282,7 +282,9 @@ def _register_routes(app):
     def terminal():
         channels = db.chan_list()
         active   = request.args.get('chan', channels[0] if channels else '#fmc')
-        return render_template('terminal.html', channels=channels, active=active)
+        bot      = state.bot_instance
+        my_nick  = (bot.get_nick() if bot else '') or db.cfg_get('nick', '')
+        return render_template('terminal.html', channels=channels, active=active, my_nick=my_nick)
 
     # ── SocketIO events ────────────────────────────────────────────────────
 
@@ -324,7 +326,14 @@ def _register_routes(app):
         if not text or not channel:
             return
         bot = state.bot_instance
-        if not bot or not bot._conn or not bot._conn.is_connected():
+        if not bot:
+            return
+        # /reconnect must work precisely when disconnected, so it can't be gated
+        # behind the "must already be connected" check below.
+        if re.match(r'^/reconnect\b', text, re.IGNORECASE):
+            bot.web_reconnect()
+            return
+        if not bot._conn or not bot._conn.is_connected():
             emit('irc_event', {'type': 'error', 'channel': channel,
                                'text': 'Bot not connected.', 'nick': '',
                                'timestamp': datetime.utcnow().isoformat()})
@@ -332,14 +341,7 @@ def _register_routes(app):
         if text.startswith('/'):
             _handle_terminal_command(bot, text, channel)
         else:
-            bot._conn.privmsg(channel, text)
-            entry = {
-                'channel': channel, 'nick': bot.get_nick(),
-                'text': text, 'type': 'privmsg',
-                'timestamp': datetime.utcnow().isoformat()
-            }
-            state.buffer_push(channel, entry)
-            db.log_msg(channel, bot.get_nick(), text, 'privmsg')
+            bot.web_privmsg(channel, text)
 
     @socketio.on('irc_action')
     def on_irc_action(data):
@@ -398,15 +400,10 @@ def _handle_terminal_command(bot, text, default_channel):
         bot.nick = parts[1]
         db.cfg_set('nick', parts[1])
     elif cmd == 'msg' and len(parts) >= 3:
-        bot._conn.privmsg(parts[1], parts[2])
+        bot.web_privmsg(parts[1], parts[2])
     elif cmd == 'me' and len(parts) >= 2:
         action_text = ' '.join(parts[1:])
-        bot._conn.action(default_channel, action_text)
-        state.buffer_push(default_channel, {
-            'type': 'action', 'nick': bot.get_nick(), 'hostmask': '',
-            'text': action_text, 'channel': default_channel,
-            'timestamp': datetime.utcnow().isoformat()
-        })
+        bot.web_action(default_channel, action_text)
     elif cmd == 'quit':
         bot._conn.quit(parts[1] if len(parts) >= 2 else 'Quit')
     elif cmd == 'kick' and len(parts) >= 2:
@@ -430,6 +427,12 @@ def _handle_terminal_command(bot, text, default_channel):
         bot.web_topic(default_channel, parts[1])
     elif cmd == 'whois' and len(parts) >= 2:
         bot.web_whois(parts[1], default_channel)
+    elif cmd == 'wii' and len(parts) >= 2:
+        bot.web_whois_idle(parts[1], default_channel)
+    elif cmd == 'disconnect':
+        bot.web_disconnect(parts[1] if len(parts) >= 2 else 'Disconnected via web')
+    elif cmd == 'reconnect':
+        bot.web_reconnect()
     elif cmd == 'mode' and len(parts) >= 2:
         if parts[1].startswith('#'):
             target = parts[1].lower()

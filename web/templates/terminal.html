@@ -14,16 +14,20 @@
     width: 170px; min-width: 170px;
     background: #111; border-right: 1px solid #2e2e2e;
     overflow-y: auto; display: flex; flex-direction: column;
+    counter-reset: winnum;
   }
   .win-section { font-size: .8em; color: #555; padding: .4rem .6rem .1rem; text-transform: uppercase; letter-spacing: .06em; }
   .win-item {
     padding: .3rem .7rem; cursor: pointer; font-size: .9em;
     color: #aaa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     border-left: 2px solid transparent;
+    counter-increment: winnum;
   }
+  .win-item::before { content: counter(winnum) ' '; color: #555; }
   .win-item:hover { color: #aaa; background: #1a1a1a; }
   .win-item.active { color: #4ec94e; border-left-color: #4ec94e; background: #1a1a1a; }
   .win-item.unread { color: #e5c07b; }
+  .win-item.unread-msg { color: #98c379; }
   .win-item.unread-mention { color: #e06c75; font-weight: bold; }
 
   #irc-center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -85,6 +89,39 @@
   #ctx-menu .ctx-sep { border-top: 1px solid #2e2e2e; margin: .2rem 0; }
   #ctx-menu .ctx-danger { color: #e06c75; }
   #ctx-menu .ctx-danger:hover { background: #3a1010; }
+
+  #win-ctx-menu {
+    display: none; position: fixed; z-index: 9999;
+    background: #1e1e1e; border: 1px solid #3e3e3e; border-radius: 4px;
+    box-shadow: 2px 4px 12px rgba(0,0,0,.6);
+    min-width: 120px; font-size: .82em;
+  }
+
+  /* /list results */
+  .list-pane { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+  /* .term-pane.active {display:block} outranks a plain .list-pane rule on
+     specificity alone, so display:flex above never actually took effect while
+     the pane was shown — that's what made .list-wrap's flex/overflow no-op
+     and the table unscrollable. Matching that selector's specificity here
+     wins on cascade order instead. */
+  .term-pane.list-pane.active { display: flex; }
+  .list-status { padding: .4rem .7rem; color: #666; font-size: .85em; border-bottom: 1px solid #2e2e2e; flex: 0 0 auto; }
+  .list-wrap { flex: 1; min-height: 0; overflow: auto; }
+  .list-table { width: 100%; border-collapse: collapse; font-size: .9em; }
+  .list-table th {
+    position: sticky; top: 0; background: #161616; color: #aaa;
+    text-align: left; padding: .4rem .7rem; cursor: pointer; user-select: none;
+    border-bottom: 1px solid #2e2e2e; white-space: nowrap;
+  }
+  .list-table th:hover { color: #fff; }
+  .list-table th.sorted { color: #4ec94e; }
+  .list-table th[data-dir="asc"]::after { content: ' \25B2'; }
+  .list-table th[data-dir="desc"]::after { content: ' \25BC'; }
+  .list-table td { padding: .3rem .7rem; border-bottom: 1px solid #1a1a1a; color: #ccc; vertical-align: top; }
+  .list-table td.list-users { text-align: right; color: #56b6c2; white-space: nowrap; }
+  .list-table td.list-chan { color: #61afef; cursor: pointer; white-space: nowrap; }
+  .list-table td.list-chan:hover { text-decoration: underline; }
+  .list-table tr:hover td { background: #161616; }
 </style>
 {% endblock %}
 {% block content %}
@@ -129,8 +166,13 @@
   <div class="ctx-item" data-action="unban">Unban</div>
 </div>
 
+<!-- Right-click context menu for window-list items -->
+<div id="win-ctx-menu">
+  <div class="ctx-item ctx-danger" data-action="close">Close window</div>
+</div>
+
 <script src="{{ url_for('static', filename='terminal.js') }}"></script>
 <script>
-  initTerminal({{ channels|tojson }}, {{ active|tojson }});
+  initTerminal({{ channels|tojson }}, {{ active|tojson }}, {{ my_nick|tojson }});
 </script>
 {% endblock %}
