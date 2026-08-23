@@ -57,23 +57,23 @@ Commands are addressed to the bot in a channel (`botnick: cmd`) or sent as a pri
 | `/terminal` | irssi-style IRC client in the browser — channel list, message pane, user list, slash commands |
 | `/shell` | A real shell on the host the bot runs on, in your browser |
 
-Login is a single-admin magic-link flow (email set via `admin_email` in config); anyone who logs in has full access to all three pages.
+Login is a single-admin magic-link flow (email set via `admin_email` in config). Once logged in, the nav bar at the top (Config / Terminal / Shell / Logout) is how you get to each page below — nothing here happens on its own, you click the page you want.
 
-**Config** — edit settings, users, channels, and servers; values can be edited in place (not just deleted):
+**Config** — click **Config** in the nav to edit settings, users, channels, and servers; values can be edited in place (not just deleted):
 
 ![Config page](docs/screenshots/config.png)
 
-**Terminal** — an irssi-style IRC client in the browser:
+**Terminal** — click **Terminal** in the nav for an irssi-style IRC client in the browser:
 
 ![Terminal page](docs/screenshots/terminal.png)
 
-**Shell** — a real shell on the host, running `ls -la`:
+**Shell** — click **Shell** in the nav for a real shell on the host, running `ls -la`:
 
 ![Shell page](docs/screenshots/shell.png)
 
 ### Shell
 
-`/shell` opens a `bash` session on the machine running the bot, as the same OS user the bot process runs as (not root) — functionally the same as SSHing into the box as that account, except it doesn't go through SSH or require that account to have login/password access (the bot's user is typically locked out of interactive login via `/usr/sbin/nologin`; the web shell bypasses that the same way `su` would, by exec'ing straight from the already-running process). There's no sandboxing beyond normal OS file permissions for that user — treat `/shell` access as equivalent to giving someone a login shell on the server, and keep `admin_email` locked down accordingly.
+Clicking **Shell** in the nav starts a `bash` session on the machine running the bot, as the same OS user the bot process runs as (not root) — functionally the same as SSHing into the box as that account, except it doesn't go through SSH or require that account to have login/password access (the bot's user is typically locked out of interactive login via `/usr/sbin/nologin`; the web shell bypasses that the same way `su` would, by exec'ing straight from the already-running process). There's no sandboxing beyond normal OS file permissions for that user — treat `/shell` access as equivalent to giving someone a login shell on the server, and keep `admin_email` locked down accordingly.
 
 ---
 
