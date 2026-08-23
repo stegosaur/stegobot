@@ -165,7 +165,16 @@ def _register_routes(app):
                 token = secrets.token_urlsafe(32)
                 db.session_create(token, email)
                 try:
-                    link = url_for('auth', token=token, _external=True)
+                    # Build the link from a configured public_url rather than
+                    # url_for(_external=True), which derives the host from
+                    # whatever Host header the request came in with — behind
+                    # the nginx proxy that's normally correct, but it means a
+                    # request that reaches Flask directly (a local curl, a
+                    # misconfigured proxy, or a spoofed Host header) silently
+                    # mails out a link pointing at the wrong place.
+                    public_url = db.cfg_get('public_url', '').rstrip('/')
+                    path = url_for('auth', token=token)
+                    link = f'{public_url}{path}' if public_url else url_for('auth', token=token, _external=True)
                     _send_magic_link(email, link)
                     msg = 'Login link sent — check your email.'
                 except Exception as exc:
