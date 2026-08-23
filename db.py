@@ -58,6 +58,24 @@ def init_schema():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             used       INTEGER DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS banwords (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel    TEXT NOT NULL,
+            word       TEXT NOT NULL,
+            added_by   TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(channel, word)
+        );
+
+        CREATE TABLE IF NOT EXISTS permbans (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel    TEXT NOT NULL,
+            mask       TEXT NOT NULL,
+            added_by   TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(channel, mask)
+        );
     """)
     c.commit()
     c.close()
@@ -199,6 +217,61 @@ def session_consume(token):
         _conn().execute('UPDATE web_sessions SET used=1 WHERE token=?', (token,))
         _conn().commit()
         return r['email']
+    return None
+
+
+# ── Banwords ────────────────────────────────────────────────────────────────
+
+def banword_add(channel, word, added_by=''):
+    _conn().execute('INSERT OR IGNORE INTO banwords(channel,word,added_by) VALUES(?,?,?)',
+                    (channel.lower(), word.lower(), added_by))
+    _conn().commit()
+
+
+def banword_delete(channel, word):
+    _conn().execute('DELETE FROM banwords WHERE channel=? AND word=?', (channel.lower(), word.lower()))
+    _conn().commit()
+
+
+def banword_list(channel):
+    return [r['word'] for r in _conn().execute(
+        'SELECT word FROM banwords WHERE channel=? ORDER BY word', (channel.lower(),))]
+
+
+def banword_match(channel, text):
+    """Return the first banned word/phrase found in text (case-insensitive substring), or None."""
+    t = text.lower()
+    rows = _conn().execute('SELECT word FROM banwords WHERE channel=?', (channel.lower(),)).fetchall()
+    for r in rows:
+        if r['word'] in t:
+            return r['word']
+    return None
+
+
+# ── Permbans ────────────────────────────────────────────────────────────────
+
+def permban_add(channel, mask, added_by=''):
+    _conn().execute('INSERT OR IGNORE INTO permbans(channel,mask,added_by) VALUES(?,?,?)',
+                    (channel.lower(), mask, added_by))
+    _conn().commit()
+
+
+def permban_delete(channel, mask):
+    _conn().execute('DELETE FROM permbans WHERE channel=? AND mask=?', (channel.lower(), mask))
+    _conn().commit()
+
+
+def permban_list(channel):
+    return [r['mask'] for r in _conn().execute(
+        'SELECT mask FROM permbans WHERE channel=? ORDER BY mask', (channel.lower(),))]
+
+
+def permban_match(channel, hostmask):
+    """Return the permban mask that matches hostmask in this channel, or None."""
+    rows = _conn().execute('SELECT mask FROM permbans WHERE channel=?', (channel.lower(),)).fetchall()
+    for r in rows:
+        if fnmatch.fnmatch(hostmask.lower(), r['mask'].lower()):
+            return r['mask']
     return None
 
 

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}StegoBot — Shell{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='xterm.css') }}">
+<script src="{{ url_for('static', filename='socket.io.min.js') }}"></script>
+<script src="{{ url_for('static', filename='xterm.js') }}"></script>
+<script src="{{ url_for('static', filename='xterm-addon-fit.js') }}"></script>
+<style>
+  main { padding: 0; height: calc(100vh - 38px); overflow: hidden; }
+  #shell-container { width: 100%; height: 100%; background: #0d0d0d; padding: 4px 6px; }
+  .xterm { height: 100% !important; }
+  .xterm-viewport { border-radius: 0 !important; }
+</style>
+{% endblock %}
+{% block content %}
+<div id="shell-container"></div>
+<script src="{{ url_for('static', filename='shell.js') }}"></script>
+{% endblock %}

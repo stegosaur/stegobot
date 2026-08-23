@@ -12,7 +12,7 @@ Commands are addressed to the bot in a channel (`botnick: cmd`) or sent as a pri
 
 | Command | Example | Description |
 |---|---|---|
-| `prompt <text>` | `<bot nickname>: prompt what is tcp/ip?` | Ask Gemini AI a question |
+| `prompt <text>` | `<bot nickname>: prompt what is tcp/ip?` | Ask Gemini AI a question, requires gemini API key in .env |
 | `ai <text>` | `<bot nickname>: ai explain tcp/ip` | Alias for `prompt` |
 | `channelprompt <text>` | `<bot nickname>: channelprompt summarize the last 24h` | Ask Gemini about this channel's logs (feeds up to 2 MB of log history as context) |
 | `stock <ticker>` | `<bot nickname>: stock AAPL` | Stock quote — price, change, range, cap, P/E, earnings, dividend |
@@ -29,6 +29,12 @@ Commands are addressed to the bot in a channel (`botnick: cmd`) or sent as a pri
 | `op me` | `<bot nickname>: op me` | Bot gives you `+o` in the current channel |
 | `join <channel>` | `<bot nickname>: join #chat` | Bot joins a channel and saves it to DB |
 | `leave` | `<bot nickname>: leave` | Bot parts the current channel and removes it from DB |
+| `banword <phrase>` | `<bot nickname>: banword "gm slur"` | Ban a word/phrase in the channel — any message containing it (case-insensitive) is auto-banned+kicked. From PM: `banword #channel <phrase>` |
+| `delbanword <phrase>` | `<bot nickname>: delbanword "gm slur"` | Remove a banned word/phrase. From PM: `delbanword #channel <phrase>` |
+| `banwords` | `<bot nickname>: banwords` | List banned words/phrases for the channel. From PM: `banwords #channel` |
+| `permban <mask>` | `<bot nickname>: permban *!*@some.host` | Ban a hostmask in the channel; also immediately kicks/bans any current member matching it. From PM: `permban #channel <mask>` |
+| `unban <mask>` | `<bot nickname>: unban *!*@some.host` | Remove a permban and lift the `+b`. From PM: `unban #channel <mask>` |
+| `permbans` | `<bot nickname>: permbans` | List permban masks for the channel. From PM: `permbans #channel` |
 
 ### Admin-only commands
 
@@ -40,6 +46,22 @@ Commands are addressed to the bot in a channel (`botnick: cmd`) or sent as a pri
 | `server <host> [port]` | `<bot nickname>: server irc.libera.chat 6667` | Reconnect to a different IRC server |
 | `addserver <host> [port]` | `<bot nickname>: addserver irc.libera.chat` | Add a server to the DB server list |
 | `delserver <host>` | `<bot nickname>: delserver irc.libera.chat` | Remove a server from the DB server list |
+
+---
+
+## Web UI Pages
+
+| Page | Description |
+|---|---|
+| `/config` | Edit bot config (key/value settings, with inline edit or delete), users, channels, and servers |
+| `/terminal` | irssi-style IRC client in the browser — channel list, message pane, user list, slash commands |
+| `/shell` | A real shell on the host the bot runs on, in your browser |
+
+Login is a single-admin magic-link flow (email set via `admin_email` in config); anyone who logs in has full access to all three pages.
+
+### Shell
+
+`/shell` opens a `bash` session on the machine running the bot, as the same OS user the bot process runs as (not root) — functionally the same as SSHing into the box as that account, except it doesn't go through SSH or require that account to have login/password access (the bot's user is typically locked out of interactive login via `/usr/sbin/nologin`; the web shell bypasses that the same way `su` would, by exec'ing straight from the already-running process). There's no sandboxing beyond normal OS file permissions for that user — treat `/shell` access as equivalent to giving someone a login shell on the server, and keep `admin_email` locked down accordingly.
 
 ---
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """StegoBot IRC core — full event tracking, web bridge."""
 
+import fnmatch
 import gzip
 import irc.client
 import logging
@@ -258,6 +259,26 @@ class StegoBot:
             else:
                 self.channel_users[ch][nl]['prefix'] = cur.replace(prefix, '')
 
+    def _enforce_ban(self, c, channel, nick, hostmask, reason, mask=None):
+        """Set a +b ban (host wildcard unless an explicit mask is given, e.g. from
+        a permban entry) and kick nick from channel."""
+        if mask is None:
+            _, _, host = hostmask.partition('@')
+            mask = f'*!*@{host}' if host else f'{nick}!*@*'
+        c.mode(channel, f'+b {mask}')
+        c.kick(channel, nick, reason)
+        self.channel_users[channel].pop(nick.lower(), None)
+
+    def _enforce_permban_now(self, c, channel, mask):
+        """Kick/ban any current channel member whose hostmask matches mask. Returns count."""
+        count = 0
+        for nl, u in list(self.channel_users.get(channel, {}).items()):
+            hm = u.get('hostmask') or self.hostmask_cache.get(nl, '')
+            if hm and fnmatch.fnmatch(hm.lower(), mask.lower()):
+                self._enforce_ban(c, channel, u.get('nick', nl), hm, reason='Banned', mask=mask)
+                count += 1
+        return count
+
     def _emit_names(self, channel):
         ch = channel.lower()
         users = [
@@ -284,6 +305,11 @@ class StegoBot:
         text     = e.arguments[0]
         _push(channel, {'type': 'privmsg', 'nick': nick, 'hostmask': hm, 'text': text,
                          'channel': channel, 'timestamp': _now()})
+
+        hit = db.banword_match(channel, text)
+        if hit:
+            self._enforce_ban(c, channel, nick, hm, reason=f'banned word: {hit}')
+            return
 
         prefix = self.nick + ':'
         if text.lower().startswith(prefix.lower()):
@@ -315,6 +341,12 @@ class StegoBot:
         if cmd == 'VERSION':
             ver = db.cfg_get('ctcp_version', 'stegobot')
             c.ctcp_reply(nick, f'VERSION {ver}')
+        if cmd == 'ACTION':
+            # The library also fires a dedicated 'action' event for this one
+            # (see _on_action), which renders it properly in the channel as
+            # "** nick text" — logging it again here would just duplicate it
+            # as a raw CTCP line in *status*.
+            return
         _push('*status*', {'type': 'ctcp', 'nick': nick, 'hostmask': hm,
                             'text': f'CTCP {cmd} from {nick} ({hm}){": " + args if args else ""}',
                             'ctcp_cmd': cmd, 'ctcp_args': args, 'timestamp': _now()})
@@ -329,6 +361,10 @@ class StegoBot:
         if nick == self.nick:
             db.chan_add(channel)
             c.who(channel)
+        else:
+            hit = db.permban_match(channel, hm)
+            if hit:
+                self._enforce_ban(c, channel, nick, hm, reason='Banned', mask=hit)
         self._emit_names(channel)
 
     def _on_part(self, c, e):
@@ -369,11 +405,19 @@ class StegoBot:
         channel    = e.target.lower()
         kicked     = e.arguments[0]
         reason     = e.arguments[1] if len(e.arguments) > 1 else ''
+        is_self    = kicked.lower() == self.nick.lower()
         self.channel_users[channel].pop(kicked.lower(), None)
+        text = (f'You were kicked by {kicker} ({reason})' if is_self
+                else f'{kicked} was kicked by {kicker} ({reason})')
         _push(channel, {'type': 'kick', 'nick': kicker, 'hostmask': km,
                          'kicked': kicked, 'reason': reason, 'channel': channel,
-                         'text': f'{kicked} was kicked by {kicker} ({reason})',
-                         'timestamp': _now()})
+                         'self': is_self, 'text': text, 'timestamp': _now()})
+        if is_self:
+            # Mirror _on_part's own-nick handling — otherwise the channel stays
+            # marked "joined" in the db (config page, auto-rejoin on reconnect)
+            # even though we're not in it anymore. The tab itself stays open
+            # (see terminal.js) so the kick message above remains visible.
+            db.chan_remove(channel)
         self._emit_names(channel)
 
     def _on_nick_change(self, c, e):
@@ -628,6 +672,53 @@ class StegoBot:
                 db.chan_remove(chan)
             return
 
+        if cmd in ('banword', 'delbanword', 'banwords'):
+            chan, rest = self._chan_scoped(args, channel, public)
+            if not chan:
+                c.privmsg(reply, f'Usage: {cmd} "phrase" (in-channel) or {cmd} #channel "phrase" (PM)')
+                return
+            if cmd == 'banwords':
+                words = db.banword_list(chan)
+                c.privmsg(reply, f'Banwords in {chan}: ' + (', '.join(words) if words else '(none)'))
+                return
+            word = rest.strip()
+            if len(word) >= 2 and word[0] in '"\'' and word[-1] == word[0]:
+                word = word[1:-1].strip()
+            if not word:
+                c.privmsg(reply, f'Usage: {cmd} "phrase"')
+                return
+            if cmd == 'banword':
+                db.banword_add(chan, word, mask)
+                c.privmsg(reply, f'Banword added to {chan}: {word}')
+            else:
+                db.banword_delete(chan, word)
+                c.privmsg(reply, f'Banword removed from {chan}: {word}')
+            return
+
+        if cmd in ('permban', 'unban', 'permbans'):
+            chan, rest = self._chan_scoped(args, channel, public)
+            if not chan:
+                c.privmsg(reply, f'Usage: {cmd} <mask> (in-channel) or {cmd} #channel <mask> (PM)')
+                return
+            if cmd == 'permbans':
+                masks = db.permban_list(chan)
+                c.privmsg(reply, f'Permbans in {chan}: ' + (', '.join(masks) if masks else '(none)'))
+                return
+            ban_mask = rest.strip()
+            if not ban_mask:
+                c.privmsg(reply, f'Usage: {cmd} <nick!user@host mask>')
+                return
+            if cmd == 'permban':
+                db.permban_add(chan, ban_mask, mask)
+                n = self._enforce_permban_now(c, chan, ban_mask)
+                c.privmsg(reply, f'Permban added to {chan}: {ban_mask}' +
+                                  (f' — kicked {n} matching user(s) now' if n else ''))
+            else:
+                db.permban_delete(chan, ban_mask)
+                c.mode(chan, f'-b {ban_mask}')
+                c.privmsg(reply, f'Unbanned {ban_mask} in {chan}')
+            return
+
         if level != 'admin':
             return
 
@@ -680,6 +771,16 @@ class StegoBot:
             db.srv_delete(parts[1])
             c.privmsg(reply, f'Removed {parts[1]}')
             return
+
+    def _chan_scoped(self, args, channel, public):
+        """Resolve (channel, rest_args) for a per-channel command: in-channel uses
+        the current channel implicitly; in PM the first token must be #channel."""
+        if public:
+            return channel, args
+        toks = args.split(None, 1)
+        if not toks or not toks[0].startswith('#'):
+            return None, args
+        return toks[0].lower(), (toks[1] if len(toks) > 1 else '')
 
     def _whois_then(self, nick, cb, *args):
         self.whois_pending[nick.lower()] = {'cb': cb, 'args': args}
@@ -768,10 +869,14 @@ class StegoBot:
         reason  = e.arguments[1] if len(e.arguments) > 1 else 'Cannot send to channel'
         if not channel:
             return
+        if self.nick.lower() not in self.channel_users.get(channel, {}):
+            text = f'Message not sent — you are not in {channel}: {reason}'
+        else:
+            text = f'Channel is moderated (+m) — message not sent: {reason}'
         _push(channel, {
             'type':      'error',
             'nick':      '',
-            'text':      f'Channel is moderated (+m) — message not sent: {reason}',
+            'text':      text,
             'channel':   channel,
             'timestamp': _now(),
         })

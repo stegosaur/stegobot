@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Flask web app — config dashboard + IRC web terminal."""
 
+import fcntl
 import gzip
 import os
+import pty
 import re
 import secrets
+import signal
 import smtplib
+import struct
 import sys
+import termios
+import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from functools import wraps
@@ -22,6 +28,8 @@ import db
 import state
 
 socketio = SocketIO(async_mode='threading')
+
+_shell_sessions = {}  # socket sid -> {'fd': pty fd, 'pid': child pid}
 
 LOG_DIR = Path('/opt/stegobot/logs')
 _HM_RE  = re.compile(r'\(([^)]+![^)]+@[^)]+)\)')
@@ -286,6 +294,13 @@ def _register_routes(app):
         my_nick  = (bot.get_nick() if bot else '') or db.cfg_get('nick', '')
         return render_template('terminal.html', channels=channels, active=active, my_nick=my_nick)
 
+    # ── Shell page ────────────────────────────────────────────────────────
+
+    @app.route('/shell')
+    @login_required
+    def shell_page():
+        return render_template('shell.html')
+
     # ── SocketIO events ────────────────────────────────────────────────────
 
     @socketio.on('connect')
@@ -376,6 +391,81 @@ def _register_routes(app):
             bot.web_whois(nick, channel)
         elif action == 'topic':
             bot.web_topic(channel, data.get('topic', ''))
+
+    # ── Shell (browser terminal onto the host, as the bot's own user) ───────
+
+    @socketio.on('connect', namespace='/shell')
+    def shell_connect():
+        if not session.get('email'):
+            return False
+        sid = request.sid
+        pid, fd = pty.fork()
+        if pid == 0:
+            # Child: replace this process image with a login-ish shell. The
+            # bot's account has /usr/sbin/nologin in /etc/passwd (blocks SSH/
+            # password login) but that doesn't stop us exec'ing bash directly
+            # from a process that's already running as that user.
+            try:
+                os.chdir('/opt/stegobot')
+            except OSError:
+                pass
+            env = dict(os.environ, TERM='xterm-256color')
+            try:
+                os.execvpe('/bin/bash', ['/bin/bash'], env)
+            finally:
+                os._exit(1)
+        _shell_sessions[sid] = {'fd': fd, 'pid': pid}
+        threading.Thread(target=_pump_shell_output, args=(sid, fd), daemon=True).start()
+
+    @socketio.on('input', namespace='/shell')
+    def shell_input(data):
+        sess = _shell_sessions.get(request.sid)
+        if sess:
+            try:
+                os.write(sess['fd'], data.encode())
+            except OSError:
+                pass
+
+    @socketio.on('resize', namespace='/shell')
+    def shell_resize(data):
+        sess = _shell_sessions.get(request.sid)
+        if not sess:
+            return
+        try:
+            cols = max(1, int(data.get('cols', 80)))
+            rows = max(1, int(data.get('rows', 24)))
+            fcntl.ioctl(sess['fd'], termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
+        except (OSError, ValueError, TypeError):
+            pass
+
+    @socketio.on('disconnect', namespace='/shell')
+    def shell_disconnect():
+        sess = _shell_sessions.pop(request.sid, None)
+        if not sess:
+            return
+        try:
+            os.kill(sess['pid'], signal.SIGHUP)
+        except ProcessLookupError:
+            pass
+        try:
+            os.close(sess['fd'])
+        except OSError:
+            pass
+
+
+def _pump_shell_output(sid, fd):
+    """Stream one shell session's pty output to its browser tab until the
+    shell exits or the fd is closed (from shell_disconnect)."""
+    while True:
+        try:
+            data = os.read(fd, 4096)
+        except OSError:
+            break
+        if not data:
+            break
+        socketio.emit('output', data.decode(errors='replace'), namespace='/shell', room=sid)
+    socketio.emit('exit', {}, namespace='/shell', room=sid)
+    _shell_sessions.pop(sid, None)
 
 
 def _handle_terminal_command(bot, text, default_channel):

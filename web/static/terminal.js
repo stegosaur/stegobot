@@ -272,7 +272,8 @@ function switchWin(name) {
   }
 
   // Update UI
-  document.getElementById('topic-bar').textContent = w.topic ? `${name}  —  ${w.topic}` : name;
+  closeDrawers();
+  document.getElementById('topic-text').textContent = w.topic ? `${name}  —  ${w.topic}` : name;
   document.getElementById('input-prompt').textContent = `[${name}]`;
   document.querySelectorAll('.win-item').forEach(el => {
     el.classList.toggle('active', el.dataset.win === name);
@@ -359,7 +360,9 @@ function formatEvent(e) {
     case 'quit':
       return `${t} ${RED}<-- ${e.nick} (${esc(e.hostmask)}) has quit${e.reason ? ' (' + esc(e.reason) + ')' : ''}${R}`;
     case 'kick':
-      return `${t} ${YELLOW}<-- ${e.kicked} was kicked by ${e.nick} (${esc(e.reason || '')})${R}`;
+      return e.self
+        ? `${t} ${YELLOW}<-- ${esc(e.text)}${R}`
+        : `${t} ${YELLOW}<-- ${e.kicked} was kicked by ${e.nick} (${esc(e.reason || '')})${R}`;
     case 'mode':
       return e.mode !== undefined
         ? `${t} ${YELLOW}-- Mode ${e.channel} [${esc(e.mode)}] by ${e.nick}${R}`
@@ -577,6 +580,25 @@ function cycleWindow(dir) {
   switchWin(items[next].dataset.win);
 }
 
+// ── Mobile drawers (channel list / names list slide over the terminal on
+// narrow screens instead of permanently occupying side columns) ──────────────
+
+function toggleDrawer(which) {
+  const el = document.getElementById(which === 'chans' ? 'win-list' : 'names-panel');
+  const isOpen = el.classList.contains('open');
+  closeDrawers();
+  if (!isOpen) {
+    el.classList.add('open');
+    document.getElementById('drawer-backdrop').classList.add('open');
+  }
+}
+
+function closeDrawers() {
+  document.getElementById('win-list').classList.remove('open');
+  document.getElementById('names-panel').classList.remove('open');
+  document.getElementById('drawer-backdrop').classList.remove('open');
+}
+
 function switchWinByIndex(n) {
   const items = document.querySelectorAll('#win-list .win-item');
   if (items[n]) switchWin(items[n].dataset.win);
@@ -614,7 +636,9 @@ function connectSocket() {
 
     // Our own part (whether from the window-close menu or a typed /part)
     // closes the window — checked first so the generic addWinTab below never
-    // gets a chance to resurrect the tab we're removing.
+    // gets a chance to resurrect the tab we're removing. Getting kicked does
+    // NOT close the tab — the kick message needs somewhere to be shown, and
+    // the channel window is the natural place for it (see bot.py _on_kick).
     if (e.type === 'part' && e.nick === myNick) {
       removeWinLocal(target);
       return;
@@ -644,7 +668,7 @@ function connectSocket() {
     }
     if (e.type === 'topic_update') {
       const w = wins.get(target);
-      if (w) { w.topic = e.topic || ''; if (target === activeWin) document.getElementById('topic-bar').textContent = w.topic ? `${target}  —  ${w.topic}` : target; }
+      if (w) { w.topic = e.topic || ''; if (target === activeWin) document.getElementById('topic-text').textContent = w.topic ? `${target}  —  ${w.topic}` : target; }
       return;
     }
 

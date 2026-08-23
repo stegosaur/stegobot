@@ -13,6 +13,7 @@
   <span class="brand">⚡ StegoBot</span>
   <a href="{{ url_for('config_page') }}" {% if request.endpoint=='config_page' %}class="active"{% endif %}>Config</a>
   <a href="{{ url_for('terminal') }}"   {% if request.endpoint=='terminal'     %}class="active"{% endif %}>Terminal</a>
+  <a href="{{ url_for('shell_page') }}" {% if request.endpoint=='shell_page'   %}class="active"{% endif %}>Shell</a>
   <a href="{{ url_for('logout') }}" class="logout">Logout</a>
 </nav>
 {% endif %}

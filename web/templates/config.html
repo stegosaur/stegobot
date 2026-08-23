@@ -11,7 +11,18 @@
     {% for k,v in config.items() %}
     <tr>
       <td><code>{{ k }}</code></td>
-      <td>{{ '*' * (v|length) if 'pass' in k.lower() or 'secret' in k.lower() else v }}</td>
+      <td>
+        <form method="post" class="inline-form" style="margin:0">
+          <input type="hidden" name="action" value="set">
+          <input type="hidden" name="key" value="{{ k }}">
+          {% if 'pass' in k.lower() or 'secret' in k.lower() %}
+          <input type="password" name="value" placeholder="(hidden — enter a new value to change)" required>
+          {% else %}
+          <input type="text" name="value" value="{{ v }}" required>
+          {% endif %}
+          <button class="btn-sm">Save</button>
+        </form>
+      </td>
       <td>
         <form method="post" style="display:inline">
           <input type="hidden" name="action" value="delete">

@@ -33,10 +33,24 @@
   #irc-center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
   #topic-bar {
+    display: flex; align-items: center; gap: .5rem;
     background: #1a1a1a; border-bottom: 1px solid #2e2e2e;
     padding: .3rem .7rem; font-size: .95em; color: #56b6c2;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     min-height: 28px;
+  }
+  #topic-text {
+    flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mobile-toggle {
+    display: none; flex: 0 0 auto;
+    background: transparent; border: 1px solid #3e3e3e; border-radius: 4px;
+    color: #ccc; font-size: 1rem; line-height: 1; padding: .3rem .5rem;
+    cursor: pointer;
+  }
+  #drawer-backdrop {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,.5); z-index: 40;
   }
 
   #term-container { flex: 1; overflow: hidden; position: relative; background: #0d0d0d; }
@@ -122,6 +136,35 @@
   .list-table td.list-chan { color: #61afef; cursor: pointer; white-space: nowrap; }
   .list-table td.list-chan:hover { text-decoration: underline; }
   .list-table tr:hover td { background: #161616; }
+
+  /* ── Mobile: channel list and names list become slide-over drawers instead
+     of permanent side columns, since neither fits alongside the terminal on
+     a phone-width screen. ── */
+  @media (max-width: 700px) {
+    .mobile-toggle { display: inline-block; }
+
+    #win-list, #names-panel {
+      position: fixed; top: 38px; bottom: 0;
+      width: 78vw; min-width: 0; max-width: 280px; z-index: 50;
+      transition: transform .2s ease;
+    }
+    #win-list {
+      left: 0; transform: translateX(-100%);
+      box-shadow: 2px 0 16px rgba(0,0,0,.6);
+    }
+    #names-panel {
+      right: 0; left: auto; transform: translateX(100%);
+      box-shadow: -2px 0 16px rgba(0,0,0,.6);
+    }
+    #win-list.open, #names-panel.open { transform: translateX(0); }
+    #drawer-backdrop.open { display: block; }
+
+    /* Bigger tap targets once fingers, not cursors, are doing the tapping. */
+    .win-item { padding: .6rem .8rem; font-size: 1em; }
+    .name-entry { padding: .5rem .7rem; font-size: 1em; }
+    #input-bar { padding: .5rem; }
+    #irc-input { font-size: 16px; } /* ≥16px keeps iOS Safari from zooming in on focus */
+  }
 </style>
 {% endblock %}
 {% block content %}
@@ -138,7 +181,11 @@
   </div>
 
   <div id="irc-center">
-    <div id="topic-bar"></div>
+    <div id="topic-bar">
+      <button class="mobile-toggle" aria-label="Channels" onclick="toggleDrawer('chans')">☰</button>
+      <span id="topic-text"></span>
+      <button class="mobile-toggle" aria-label="Users" onclick="toggleDrawer('names')">👥</button>
+    </div>
     <div id="term-container"></div>
     <div id="input-bar">
       <span id="input-prompt">[*status*]</span>
@@ -149,6 +196,7 @@
 
   <div id="names-panel"></div>
 </div>
+<div id="drawer-backdrop" onclick="closeDrawers()"></div>
 
 <!-- Right-click context menu -->
 <div id="ctx-menu">
