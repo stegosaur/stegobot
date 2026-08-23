@@ -229,6 +229,12 @@ class StegoBot:
     def _safe_privmsg(self, target, text):
         if self._conn and self._conn.is_connected():
             self._conn.privmsg(target, text)
+            # IRC servers don't echo your own PRIVMSGs back to you, so unlike
+            # every other event in this file, nothing pushes this to the web
+            # UI unless we do it here (see web_privmsg for the same reasoning).
+            hm = self.hostmask_cache.get(self.nick.lower(), '')
+            _push(target.lower(), {'type': 'privmsg', 'nick': self.nick, 'hostmask': hm,
+                                    'text': text, 'channel': target.lower(), 'timestamp': _now()})
 
     def get_nick(self):
         return self.nick
@@ -644,7 +650,7 @@ class StegoBot:
             'channel': channel,
             'public':  public,
             'level':   level,
-            'reply':   (lambda msg: c.privmsg(reply, msg)) if reply else (lambda msg: None),
+            'reply':   (lambda msg: self._safe_privmsg(reply, msg)) if reply else (lambda msg: None),
             'conn':    c,
         }
         if plugin_loader.dispatch(cmd, args, ctx):
@@ -675,48 +681,48 @@ class StegoBot:
         if cmd in ('banword', 'delbanword', 'banwords'):
             chan, rest = self._chan_scoped(args, channel, public)
             if not chan:
-                c.privmsg(reply, f'Usage: {cmd} "phrase" (in-channel) or {cmd} #channel "phrase" (PM)')
+                self._safe_privmsg(reply, f'Usage: {cmd} "phrase" (in-channel) or {cmd} #channel "phrase" (PM)')
                 return
             if cmd == 'banwords':
                 words = db.banword_list(chan)
-                c.privmsg(reply, f'Banwords in {chan}: ' + (', '.join(words) if words else '(none)'))
+                self._safe_privmsg(reply, f'Banwords in {chan}: ' + (', '.join(words) if words else '(none)'))
                 return
             word = rest.strip()
             if len(word) >= 2 and word[0] in '"\'' and word[-1] == word[0]:
                 word = word[1:-1].strip()
             if not word:
-                c.privmsg(reply, f'Usage: {cmd} "phrase"')
+                self._safe_privmsg(reply, f'Usage: {cmd} "phrase"')
                 return
             if cmd == 'banword':
                 db.banword_add(chan, word, mask)
-                c.privmsg(reply, f'Banword added to {chan}: {word}')
+                self._safe_privmsg(reply, f'Banword added to {chan}: {word}')
             else:
                 db.banword_delete(chan, word)
-                c.privmsg(reply, f'Banword removed from {chan}: {word}')
+                self._safe_privmsg(reply, f'Banword removed from {chan}: {word}')
             return
 
         if cmd in ('permban', 'unban', 'permbans'):
             chan, rest = self._chan_scoped(args, channel, public)
             if not chan:
-                c.privmsg(reply, f'Usage: {cmd} <mask> (in-channel) or {cmd} #channel <mask> (PM)')
+                self._safe_privmsg(reply, f'Usage: {cmd} <mask> (in-channel) or {cmd} #channel <mask> (PM)')
                 return
             if cmd == 'permbans':
                 masks = db.permban_list(chan)
-                c.privmsg(reply, f'Permbans in {chan}: ' + (', '.join(masks) if masks else '(none)'))
+                self._safe_privmsg(reply, f'Permbans in {chan}: ' + (', '.join(masks) if masks else '(none)'))
                 return
             ban_mask = rest.strip()
             if not ban_mask:
-                c.privmsg(reply, f'Usage: {cmd} <nick!user@host mask>')
+                self._safe_privmsg(reply, f'Usage: {cmd} <nick!user@host mask>')
                 return
             if cmd == 'permban':
                 db.permban_add(chan, ban_mask, mask)
                 n = self._enforce_permban_now(c, chan, ban_mask)
-                c.privmsg(reply, f'Permban added to {chan}: {ban_mask}' +
+                self._safe_privmsg(reply, f'Permban added to {chan}: {ban_mask}' +
                                   (f' — kicked {n} matching user(s) now' if n else ''))
             else:
                 db.permban_delete(chan, ban_mask)
                 c.mode(chan, f'-b {ban_mask}')
-                c.privmsg(reply, f'Unbanned {ban_mask} in {chan}')
+                self._safe_privmsg(reply, f'Unbanned {ban_mask} in {chan}')
             return
 
         if level != 'admin':
@@ -726,7 +732,7 @@ class StegoBot:
             target_nick = parts[1]
             new_level   = parts[2].lower()
             if new_level not in ('peon', 'admin'):
-                c.privmsg(reply, 'Level must be peon or admin.')
+                self._safe_privmsg(reply, 'Level must be peon or admin.')
                 return
             self._whois_then(target_nick, self._adduser_cb, reply, new_level)
             return
@@ -742,21 +748,21 @@ class StegoBot:
             try:
                 cols, rows = db.run_query(sql)
                 if not rows:
-                    c.privmsg(reply, '(no results)')
+                    self._safe_privmsg(reply, '(no results)')
                     return
-                c.privmsg(reply, ' | '.join(cols))
+                self._safe_privmsg(reply, ' | '.join(cols))
                 for row in rows[:10]:
-                    c.privmsg(reply, ' | '.join(str(v) for v in row))
+                    self._safe_privmsg(reply, ' | '.join(str(v) for v in row))
                 if len(rows) > 10:
-                    c.privmsg(reply, f'… {len(rows)-10} more rows omitted')
+                    self._safe_privmsg(reply, f'… {len(rows)-10} more rows omitted')
             except Exception as exc:
-                c.privmsg(reply, f'SQL error: {exc}')
+                self._safe_privmsg(reply, f'SQL error: {exc}')
             return
 
         if cmd == 'server' and len(parts) >= 2:
             host = parts[1]
             port = int(parts[2]) if len(parts) >= 3 else 6667
-            c.privmsg(reply, f'Switching to {host}:{port}…')
+            self._safe_privmsg(reply, f'Switching to {host}:{port}…')
             self.reconnect_requested = (host, port)
             return
 
@@ -764,12 +770,12 @@ class StegoBot:
             host = parts[1]
             port = int(parts[2]) if len(parts) >= 3 else 6667
             db.srv_add(host, port)
-            c.privmsg(reply, f'Added {host}:{port}')
+            self._safe_privmsg(reply, f'Added {host}:{port}')
             return
 
         if cmd == 'delserver' and len(parts) >= 2:
             db.srv_delete(parts[1])
-            c.privmsg(reply, f'Removed {parts[1]}')
+            self._safe_privmsg(reply, f'Removed {parts[1]}')
             return
 
     def _chan_scoped(self, args, channel, public):
