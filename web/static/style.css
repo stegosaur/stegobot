@@ -42,10 +42,13 @@ code { color:var(--yellow); }
 
 /* FORMS */
 .inline-form { display:flex; gap:.5rem; margin-top:.75rem; flex-wrap:wrap; }
-input[type=text], input[type=email], input[type=number], select {
+.stack-form { display:flex; flex-direction:column; gap:.5rem; margin-top:.75rem; }
+.stack-form .inline-form { margin-top:0; }
+input[type=text], input[type=email], input[type=number], select, textarea {
   background:var(--bg3); border:1px solid var(--border); color:var(--fg);
   padding:.35rem .6rem; border-radius:3px; flex:1; min-width:120px; }
-input:focus, select:focus { outline:none; border-color:var(--acc); }
+textarea { width:100%; font-family:inherit; font-size:inherit; resize:vertical; }
+input:focus, select:focus, textarea:focus { outline:none; border-color:var(--acc); }
 button { background:var(--acc); color:#fff; border:none; padding:.35rem .8rem;
          border-radius:3px; cursor:pointer; white-space:nowrap; }
 button:hover { background:#6a9fff; }

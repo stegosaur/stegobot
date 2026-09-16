@@ -53,7 +53,7 @@ Commands are addressed to the bot in a channel (`botnick: cmd`) or sent as a pri
 
 | Page | Description |
 |---|---|
-| `/config` | Edit bot config (key/value settings, with inline edit or delete), users, channels, and servers |
+| `/config` | Edit bot config (key/value settings, with inline edit or delete), users, channels, servers, permbans, and line-count auto-replies |
 | `/terminal` | irssi-style IRC client in the browser — channel list, message pane, user list, slash commands |
 | `/shell` | A real shell on the host the bot runs on, in your browser |
 
@@ -102,6 +102,8 @@ Typed in the terminal input (prefix with `/`). Always operate on the currently a
 | `/mode <mode> [arg]` | `/mode +m` | Set a channel mode |
 | `/raw <line>` | `/raw PRIVMSG #chan :hi` | Send a raw IRC line |
 | `/<anything else>` | `/stats p` | Unknown slash commands are sent as raw IRC |
+
+**Line-count auto-replies** — in `/config`, register a hostmask pattern (`nick!ident@host`, `*` wildcards allowed) plus one or more channels. Once a matching user has sent that many lines in a matching channel, the bot sends one message there — picked at random if more than one is stored — and starts counting again. Trigger amount can be a fixed number of lines, or "random, up to a max" (a fresh random threshold between 1 and the max is rolled each cycle). Counting is tracked separately per channel and per concrete hostmask, so a wildcard pattern tracks each matching user independently.
 
 ---
 

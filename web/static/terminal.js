@@ -744,8 +744,37 @@ function initTerminal(channels, activeChannel, nick) {
 
   switchWin(activeChannel || (channels.length ? channels[0] : '*status*'));
 
+  // ── Mobile keyboard ───────────────────────────────────────────────────────
+  // On-screen keyboards shrink the *visual* viewport without changing 100vh
+  // (iOS Safari) or resize the layout late/inconsistently (Android Chrome),
+  // so #input-bar — laid out at the bottom of a `main` sized off 100vh —
+  // ends up rendered underneath the keyboard instead of just above it. Track
+  // the real visible height in a CSS var and size `main` off that instead.
+  const applyViewportHeight = () => {
+    const vv = window.visualViewport;
+    const h = vv ? vv.height : window.innerHeight;
+    document.documentElement.style.setProperty('--app-height', `${h}px`);
+    // iOS can leave the page scrolled once the keyboard opens/closes, so the
+    // top of `main` (pinned to --app-height) drifts out of view; snap back.
+    if (vv) window.scrollTo(0, 0);
+  };
+  applyViewportHeight();
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', applyViewportHeight);
+    window.visualViewport.addEventListener('scroll', applyViewportHeight);
+  } else {
+    window.addEventListener('resize', applyViewportHeight);
+  }
+
   // Input
   const input = document.getElementById('irc-input');
+  // Some Android keyboards resize the visual viewport only after the browser
+  // has already auto-scrolled the focused input into its own idea of "view",
+  // which can leave it misaligned with our just-resized `main`. Re-nudge it
+  // into view once the keyboard animation has settled.
+  input.addEventListener('focus', () => {
+    setTimeout(() => input.scrollIntoView({ block: 'end' }), 250);
+  });
   input.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Tab') tabState = null;
 

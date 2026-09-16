@@ -96,6 +96,114 @@
   </form>
 </div>
 
+<h2>Permbans</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>Scope</th><th>Mask</th><th>Added by</th><th>Added</th><th></th></tr></thead>
+    <tbody>
+    {% for b in permbans %}
+    <tr>
+      <td>
+        <form method="post" action="{{ url_for('set_permban_scope') }}" class="inline-form" style="margin:0">
+          <input type="hidden" name="id" value="{{ b.id }}">
+          <select name="scope">
+            <option value="{{ global_scope }}" {% if b.channel == global_scope %}selected{% endif %}>All channels</option>
+            {% for ch in channels %}
+            <option value="{{ ch.name }}" {% if b.channel == ch.name %}selected{% endif %}>{{ ch.name }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn-sm">Save</button>
+        </form>
+      </td>
+      <td><code>{{ b.mask }}</code></td>
+      <td>{{ b.added_by or '' }}</td>
+      <td>{{ (b.created_at or '')[:10] }}</td>
+      <td>
+        <form method="post" action="{{ url_for('del_permban') }}" style="display:inline">
+          <input type="hidden" name="id" value="{{ b.id }}">
+          <input type="hidden" name="mask" value="{{ b.mask }}">
+          <input type="hidden" name="scope" value="{{ b.channel }}">
+          <button class="btn-danger btn-sm">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="{{ url_for('add_permban') }}" class="inline-form">
+    <select name="scope">
+      <option value="{{ global_scope }}">All channels</option>
+      {% for ch in channels %}
+      <option value="{{ ch.name }}">{{ ch.name }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="mask" placeholder="*!*@some.host" required>
+    <button>Add permban</button>
+  </form>
+</div>
+
+<h2>Auto-Troll</h2>
+<div class="card">
+  <p style="color:var(--fg2); margin-bottom:.5rem;">
+    Once a matching user has sent the given number of lines in a matching channel, the bot
+    sends one message — picked at random if more than one is stored — there and starts
+    counting again from zero. Hostmask supports <code>*</code> wildcards, e.g.
+    <code>*!*@some.host</code> matches any nick from that host.
+  </p>
+  <table>
+    <thead><tr><th>Hostmask</th><th>Channels</th><th>Trigger</th><th>Messages</th><th>Status</th><th>Added by</th><th></th></tr></thead>
+    <tbody>
+    {% for t in linetriggers %}
+    <tr>
+      <td><code>{{ t.hostmask }}</code></td>
+      <td>{{ 'All channels' if t.channels == all_channels else t.channels }}</td>
+      <td>
+        {% if t.mode == 'random' %}
+          random, up to {{ t.random_max }} lines
+        {% else %}
+          every {{ t.threshold }} lines
+        {% endif %}
+      </td>
+      <td style="white-space:pre-wrap; max-width:280px">{{ t.messages }}</td>
+      <td>
+        <form method="post" action="{{ url_for('toggle_linetrigger') }}" style="display:inline; margin:0">
+          <input type="hidden" name="id" value="{{ t.id }}">
+          <input type="hidden" name="enabled" value="{{ '0' if t.enabled else '1' }}">
+          <button class="btn-sm {{ '' if t.enabled else 'btn-danger' }}">{{ 'Enabled' if t.enabled else 'Disabled' }}</button>
+        </form>
+      </td>
+      <td>{{ t.added_by or '' }}</td>
+      <td>
+        <form method="post" action="{{ url_for('del_linetrigger') }}" style="display:inline">
+          <input type="hidden" name="id" value="{{ t.id }}">
+          <button class="btn-danger btn-sm">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="{{ url_for('add_linetrigger') }}" class="stack-form">
+    <div class="inline-form">
+      <input type="text" name="hostmask" placeholder="nick!ident@host.com (wildcards ok, e.g. *!*@some.host)" required style="flex:2">
+      <input type="text" name="channels" placeholder="#chan1,#chan2 (blank = all channels)" style="flex:1">
+    </div>
+    <div class="inline-form">
+      <select name="mode" id="lt-mode" onchange="
+        document.getElementById('lt-fixed').style.display  = this.value==='fixed'  ? '' : 'none';
+        document.getElementById('lt-random').style.display = this.value==='random' ? '' : 'none';
+      ">
+        <option value="fixed">Fixed line count</option>
+        <option value="random">Random, up to a max</option>
+      </select>
+      <input type="number" id="lt-fixed" name="threshold" placeholder="lines before reply, e.g. 20" min="1">
+      <input type="number" id="lt-random" name="random_max" placeholder="max random lines, e.g. 50" min="1" style="display:none">
+    </div>
+    <textarea name="messages" placeholder="Reply message(s) — one per line; a random one is picked when triggered" rows="3" required></textarea>
+    <button style="align-self:flex-start">Add trigger</button>
+  </form>
+</div>
+
 <h2>Servers</h2>
 <div class="card">
   <table>

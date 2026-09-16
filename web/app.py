@@ -16,7 +16,7 @@ import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from functools import wraps
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from flask import (Flask, render_template, request, redirect, url_for,
@@ -112,6 +112,9 @@ def create_app():
     app.secret_key = db.cfg_get('web_secret', secrets.token_hex(32))
     if not db.cfg_get('web_secret'):
         db.cfg_set('web_secret', app.secret_key)
+    # Login cookie lives for two weeks instead of expiring when the browser
+    # closes — session.permanent is set on login (see the /auth/<token> route).
+    app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=14)
     socketio.init_app(app, cors_allowed_origins='*')
     _register_routes(app)
     return app
@@ -188,6 +191,7 @@ def _register_routes(app):
     def auth(token):
         email = db.session_consume(token)
         if email:
+            session.permanent = True
             session['email'] = email
             return redirect(url_for('index'))
         return 'Invalid or expired link.', 400
@@ -216,13 +220,17 @@ def _register_routes(app):
                 db.cfg_delete(key)
                 msg = f'Deleted {key}'
 
-        config   = db.cfg_all()
-        users    = db.user_list()
-        channels = db.chan_all()
-        servers  = db.srv_list()
+        config       = db.cfg_all()
+        users        = db.user_list()
+        channels     = db.chan_all()
+        servers      = db.srv_list()
+        permbans     = db.permban_all()
+        linetriggers = db.linetrigger_list()
         return render_template('config.html',
                                config=config, users=users,
-                               channels=channels, servers=servers, msg=msg)
+                               channels=channels, servers=servers,
+                               permbans=permbans, global_scope=db.GLOBAL_SCOPE,
+                               linetriggers=linetriggers, all_channels=db.ALL_CHANNELS, msg=msg)
 
     @app.route('/config/user/add', methods=['POST'])
     @login_required
@@ -280,6 +288,118 @@ def _register_routes(app):
             if bot and bot._conn and bot._conn.is_connected():
                 bot._conn.part(name)
         return redirect(url_for('config_page'))
+
+    # ── Permbans ──────────────────────────────────────────────────────────
+
+    def _normalize_scope(scope):
+        """'*' (or blank) means every channel; anything else is a channel name."""
+        scope = (scope or '').strip()
+        if not scope or scope == db.GLOBAL_SCOPE:
+            return db.GLOBAL_SCOPE
+        return scope if scope.startswith('#') else f'#{scope}'
+
+    @app.route('/config/permban/add', methods=['POST'])
+    @login_required
+    def add_permban():
+        scope = _normalize_scope(request.form.get('scope', ''))
+        mask  = request.form.get('mask', '').strip()
+        if mask:
+            db.permban_add(scope, mask, session.get('email', ''))
+            bot = state.bot_instance
+            if bot and bot._conn and bot._conn.is_connected():
+                bot._enforce_permban_now(bot._conn, scope.lower() if scope != db.GLOBAL_SCOPE else scope, mask)
+        return redirect(url_for('config_page'))
+
+    @app.route('/config/permban/del', methods=['POST'])
+    @login_required
+    def del_permban():
+        ban_id = request.form.get('id', '').strip()
+        mask   = request.form.get('mask', '')
+        scope  = request.form.get('scope', '')
+        if ban_id:
+            db.permban_delete_id(int(ban_id))
+            bot = state.bot_instance
+            if bot and bot._conn and bot._conn.is_connected() and mask:
+                chans = bot.channel_users.keys() if scope == db.GLOBAL_SCOPE else [scope]
+                for ch in chans:
+                    bot._conn.mode(ch, f'-b {mask}')
+        return redirect(url_for('config_page'))
+
+    @app.route('/config/permban/scope', methods=['POST'])
+    @login_required
+    def set_permban_scope():
+        ban_id = request.form.get('id', '').strip()
+        scope  = _normalize_scope(request.form.get('scope', ''))
+        if ban_id:
+            db.permban_set_scope(int(ban_id), scope)
+        return redirect(url_for('config_page'))
+
+    # ── Line-count triggers ──────────────────────────────────────────────────
+
+    @app.route('/config/linetrigger/add', methods=['POST'])
+    @login_required
+    def add_linetrigger():
+        hostmask   = request.form.get('hostmask', '').strip()
+        channels   = request.form.get('channels', '').strip()
+        mode       = request.form.get('mode', 'fixed').strip()
+        threshold  = request.form.get('threshold', '').strip()
+        random_max = request.form.get('random_max', '').strip()
+        messages   = request.form.get('messages', '').strip('\r\n')
+        if hostmask and messages and mode in ('fixed', 'random'):
+            # Normalize a bare channel name (no leading '#') the same way the
+            # rest of the UI does; '*'/blank stays as "every channel".
+            parts = [c.strip() for c in channels.split(',') if c.strip()]
+            norm  = ','.join(p if p == db.ALL_CHANNELS or p.startswith('#') else f'#{p}' for p in parts)
+            db.linetrigger_add(
+                hostmask, norm, mode,
+                int(threshold) if mode == 'fixed' and threshold.isdigit() else None,
+                int(random_max) if mode == 'random' and random_max.isdigit() else None,
+                messages, session.get('email', ''))
+        return redirect(url_for('config_page'))
+
+    @app.route('/config/linetrigger/del', methods=['POST'])
+    @login_required
+    def del_linetrigger():
+        trigger_id = request.form.get('id', '').strip()
+        if trigger_id.isdigit():
+            db.linetrigger_delete(int(trigger_id))
+        return redirect(url_for('config_page'))
+
+    @app.route('/config/linetrigger/toggle', methods=['POST'])
+    @login_required
+    def toggle_linetrigger():
+        trigger_id = request.form.get('id', '').strip()
+        enabled    = request.form.get('enabled', '') == '1'
+        if trigger_id.isdigit():
+            db.linetrigger_set_enabled(int(trigger_id), enabled)
+        return redirect(url_for('config_page'))
+
+    # ── Database browser ─────────────────────────────────────────────────
+
+    @app.route('/database', methods=['GET', 'POST'])
+    @login_required
+    def database_page():
+        tables = [r[0] for r in db.run_query(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name")[1]]
+
+        query_cols, query_rows, query_error = None, None, None
+        sql = request.form.get('sql', '').strip() if request.method == 'POST' else ''
+        if sql:
+            try:
+                query_cols, query_rows = db.run_query(sql)
+            except Exception as exc:
+                query_error = str(exc)
+
+        table = request.args.get('table', '')
+        table_cols, table_rows = [], []
+        if table in tables:
+            table_cols, table_rows = db.run_query(f'SELECT * FROM "{table}" LIMIT 500')
+
+        return render_template('database.html', tables=tables, table=table,
+                               table_cols=table_cols, table_rows=table_rows,
+                               sql=sql, query_cols=query_cols, query_rows=query_rows,
+                               query_error=query_error)
 
     # ── Debug ─────────────────────────────────────────────────────────────
 

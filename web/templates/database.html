@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}StegoBot — Database{% endblock %}
+{% block content %}
+
+<h2>Tables</h2>
+<div class="card">
+  <div class="inline-form" style="margin-top:0">
+    {% for t in tables %}
+    <a class="chanitem{{ ' active' if t == table else '' }}" href="{{ url_for('database_page', table=t) }}">{{ t }}</a>
+    {% endfor %}
+  </div>
+</div>
+
+{% if table %}
+<h2><code>{{ table }}</code> <span style="color:var(--fg2); font-weight:normal; font-size:.75em">(showing up to 500 rows — live from stegobot.db)</span></h2>
+<div class="card">
+  {% if table_cols %}
+  <div style="overflow-x:auto">
+  <table>
+    <thead><tr>{% for c in table_cols %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in table_rows %}
+    <tr>{% for v in row %}<td>{{ v if v is not none else '' }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p style="color:var(--fg2)">(empty)</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<h2>Query</h2>
+<div class="card">
+  <p style="color:var(--fg2); margin-bottom:.5rem;">
+    Runs directly against <code>stegobot.db</code> — same as the bot's own <code>!query</code>
+    admin command. Not restricted to <code>SELECT</code>, so treat it like a root shell on the DB.
+  </p>
+  <form method="post" class="stack-form">
+    <textarea name="sql" rows="3" placeholder="SELECT * FROM config" style="font-family:monospace">{{ sql or '' }}</textarea>
+    <button style="align-self:flex-start">Run</button>
+  </form>
+  {% if query_error %}
+  <p style="color:var(--red); margin-top:.75rem">{{ query_error }}</p>
+  {% elif query_cols is not none %}
+  <div style="overflow-x:auto; margin-top:.75rem">
+  <table>
+    <thead><tr>{% for c in query_cols %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in query_rows %}
+    <tr>{% for v in row %}<td>{{ v if v is not none else '' }}</td>{% endfor %}</tr>
+    {% else %}
+    <tr><td colspan="{{ query_cols|length if query_cols else 1 }}" style="color:var(--fg2)">(no results)</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

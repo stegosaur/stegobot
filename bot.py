@@ -276,13 +276,17 @@ class StegoBot:
         self.channel_users[channel].pop(nick.lower(), None)
 
     def _enforce_permban_now(self, c, channel, mask):
-        """Kick/ban any current channel member whose hostmask matches mask. Returns count."""
+        """Kick/ban any current member whose hostmask matches mask. If channel is
+        db.GLOBAL_SCOPE ('*'), sweep every channel the bot currently sits in
+        instead of just one. Returns the number kicked."""
+        channels = list(self.channel_users.keys()) if channel == db.GLOBAL_SCOPE else [channel]
         count = 0
-        for nl, u in list(self.channel_users.get(channel, {}).items()):
-            hm = u.get('hostmask') or self.hostmask_cache.get(nl, '')
-            if hm and fnmatch.fnmatch(hm.lower(), mask.lower()):
-                self._enforce_ban(c, channel, u.get('nick', nl), hm, reason='Banned', mask=mask)
-                count += 1
+        for ch in channels:
+            for nl, u in list(self.channel_users.get(ch, {}).items()):
+                hm = u.get('hostmask') or self.hostmask_cache.get(nl, '')
+                if hm and fnmatch.fnmatch(hm.lower(), mask.lower()):
+                    self._enforce_ban(c, ch, u.get('nick', nl), hm, reason='Banned', mask=mask)
+                    count += 1
         return count
 
     def _emit_names(self, channel):
@@ -295,6 +299,19 @@ class StegoBot:
                                            u['nick'].lower()))
         ]
         state.buffer_push(channel, {'type': 'names_update', 'channel': channel, 'users': users, 'timestamp': _now()})
+
+    def _check_line_triggers(self, channel, hostmask):
+        """After a channel line, bump every configured line-count trigger whose
+        hostmask pattern matches the sender and whose channel scope includes
+        this channel; fire (send the stored messages) any that just reached
+        their goal. See db.py's line_triggers/line_trigger_counts tables."""
+        for row in db.linetrigger_enabled_for_channel(channel):
+            if not fnmatch.fnmatch(hostmask.lower(), row['hostmask'].lower()):
+                continue
+            msgs = db.linetrigger_bump(row, channel, hostmask)
+            if msgs:
+                for line in msgs:
+                    self._safe_privmsg(channel, line)
 
     # ── IRC event handlers ────────────────────────────────────────────────────
 
@@ -316,6 +333,8 @@ class StegoBot:
         if hit:
             self._enforce_ban(c, channel, nick, hm, reason=f'banned word: {hit}')
             return
+
+        self._check_line_triggers(channel, hm)
 
         prefix = self.nick + ':'
         if text.lower().startswith(prefix.lower()):
@@ -621,6 +640,10 @@ class StegoBot:
                                 'text': f'Nick {requested} is already in use'})
 
     def _on_disconnect(self, c, e):
+        if c is not self._conn:
+            # Belated disconnect from a connection we already superseded
+            # (e.g. mid server-switch) — the live connection is unaffected.
+            return
         reason = e.arguments[0] if e.arguments else ''
         logger.warning('Disconnected: %s', reason)
         _push('*status*', {'type': 'disconnect', 'nick': '', 'text': f'Disconnected: {reason}', 'timestamp': _now()})
@@ -702,13 +725,15 @@ class StegoBot:
             return
 
         if cmd in ('permban', 'unban', 'permbans'):
-            chan, rest = self._chan_scoped(args, channel, public)
+            chan, rest = self._chan_scoped(args, channel, public, allow_global=True)
             if not chan:
-                self._safe_privmsg(reply, f'Usage: {cmd} <mask> (in-channel) or {cmd} #channel <mask> (PM)')
+                self._safe_privmsg(reply, f'Usage: {cmd} <mask> (in-channel), '
+                                  f'{cmd} all <mask> (every channel), or {cmd} #channel <mask> (PM)')
                 return
+            scope_label = 'all channels' if chan == db.GLOBAL_SCOPE else chan
             if cmd == 'permbans':
                 masks = db.permban_list(chan)
-                self._safe_privmsg(reply, f'Permbans in {chan}: ' + (', '.join(masks) if masks else '(none)'))
+                self._safe_privmsg(reply, f'Permbans for {scope_label}: ' + (', '.join(masks) if masks else '(none)'))
                 return
             ban_mask = rest.strip()
             if not ban_mask:
@@ -717,12 +742,14 @@ class StegoBot:
             if cmd == 'permban':
                 db.permban_add(chan, ban_mask, mask)
                 n = self._enforce_permban_now(c, chan, ban_mask)
-                self._safe_privmsg(reply, f'Permban added to {chan}: {ban_mask}' +
+                self._safe_privmsg(reply, f'Permban added for {scope_label}: {ban_mask}' +
                                   (f' — kicked {n} matching user(s) now' if n else ''))
             else:
                 db.permban_delete(chan, ban_mask)
-                c.mode(chan, f'-b {ban_mask}')
-                self._safe_privmsg(reply, f'Unbanned {ban_mask} in {chan}')
+                bans_channels = self.channel_users.keys() if chan == db.GLOBAL_SCOPE else [chan]
+                for ch in bans_channels:
+                    c.mode(ch, f'-b {ban_mask}')
+                self._safe_privmsg(reply, f'Unbanned {ban_mask} for {scope_label}')
             return
 
         if level != 'admin':
@@ -778,12 +805,16 @@ class StegoBot:
             self._safe_privmsg(reply, f'Removed {parts[1]}')
             return
 
-    def _chan_scoped(self, args, channel, public):
+    def _chan_scoped(self, args, channel, public, allow_global=False):
         """Resolve (channel, rest_args) for a per-channel command: in-channel uses
-        the current channel implicitly; in PM the first token must be #channel."""
+        the current channel implicitly; in PM the first token must be #channel.
+        When allow_global, a leading 'all' token (in-channel or PM) resolves to
+        db.GLOBAL_SCOPE instead, meaning every channel."""
+        toks = args.split(None, 1)
+        if allow_global and toks and toks[0].lower() == 'all':
+            return db.GLOBAL_SCOPE, (toks[1] if len(toks) > 1 else '')
         if public:
             return channel, args
-        toks = args.split(None, 1)
         if not toks or not toks[0].startswith('#'):
             return None, args
         return toks[0].lower(), (toks[1] if len(toks) > 1 else '')

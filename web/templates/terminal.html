@@ -7,7 +7,12 @@
 <script src="{{ url_for('static', filename='xterm-addon-fit.js') }}"></script>
 <style>
   /* Override base layout for full-height terminal */
-  main { padding: 0; height: calc(100vh - 38px); display: flex; flex-direction: column; overflow: hidden; }
+  /* --app-height tracks the *visual* viewport (see the JS in initTerminal),
+     not 100vh — 100vh stays pinned to the layout viewport on mobile even
+     while an on-screen keyboard is open, which pushed #input-bar down off
+     the bottom of the visible area instead of sitting above the keyboard. */
+  html, body { height: 100%; overflow: hidden; }
+  main { padding: 0; height: calc(var(--app-height, 100vh) - 38px); display: flex; flex-direction: column; overflow: hidden; }
   #irc-wrap { display: flex; flex: 1; min-height: 0; }
 
   #win-list {
