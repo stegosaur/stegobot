@@ -23,9 +23,9 @@ import db
 
 log = logging.getLogger('stegobot')
 
-DEFAULT_SSH_HOST     = 'alpha.stegosaur.org'
+DEFAULT_SSH_HOST     = 'stegosaur.org'
 DEFAULT_SSH_USER     = 'stegosaur'
-DEFAULT_SSH_PORT     = 15001
+DEFAULT_SSH_PORT     = 222
 DEFAULT_REMOTE_PORT  = 11434
 DEFAULT_LOCAL_PORT   = 11435
 DEFAULT_MODEL        = 'llama3.2'
