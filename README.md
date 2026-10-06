@@ -27,8 +27,8 @@ Commands are addressed to the bot in a channel (`botnick: cmd`) or sent as a pri
 | Command | Example | Description |
 |---|---|---|
 | `op me` | `<bot nickname>: op me` | Bot gives you `+o` in the current channel |
-| `join <channel>` | `<bot nickname>: join #chat` | Bot joins a channel and saves it to DB |
-| `leave` | `<bot nickname>: leave` | Bot parts the current channel and removes it from DB |
+| `join <channel>` | `<bot nickname>: join #chat` | Bot joins a channel and saves it to DB (autojoin — see below) |
+| `leave [#channel]` | `<bot nickname>: leave` / `<bot nickname>: leave #chat` | Bot parts the channel (current channel if none given; PM requires one) and removes it from DB, stopping autojoin |
 | `banword <phrase>` | `<bot nickname>: banword "gm slur"` | Ban a word/phrase in the channel — any message containing it (case-insensitive) is auto-banned+kicked. From PM: `banword #channel <phrase>` |
 | `delbanword <phrase>` | `<bot nickname>: delbanword "gm slur"` | Remove a banned word/phrase. From PM: `delbanword #channel <phrase>` |
 | `banwords` | `<bot nickname>: banwords` | List banned words/phrases for the channel. From PM: `banwords #channel` |
@@ -36,12 +36,17 @@ Commands are addressed to the bot in a channel (`botnick: cmd`) or sent as a pri
 | `unban <mask>` | `<bot nickname>: unban *!*@some.host` | Remove a permban and lift the `+b`. From PM: `unban #channel <mask>` |
 | `permbans` | `<bot nickname>: permbans` | List permban masks for the channel. From PM: `permbans #channel` |
 
+### Channels (autojoin)
+
+Every channel in the `channels` DB table is an autojoin channel: the bot joins all of them on connect, and a background check every 30s (re)joins any of them it isn't currently sitting in. Getting kicked does **not** remove a channel from the DB — the bot just keeps retrying it every 30s until it's let back in. The only way to stop the bot from being in a channel for good is `leave <#channel>` (admin/peon), which parts and removes it from the DB.
+
 ### Admin-only commands
 
 | Command | Example | Description |
 |---|---|---|
 | `adduser <nick> <level>` | `<bot nickname>: adduser john peon` | WHOISes nick and adds their hostmask to the user DB (levels: `peon`, `admin`) |
 | `nick <newnick>` | `<bot nickname>: nick newname` | Change the bot's nick and save to config |
+| `orignick <nick> <seconds>` | `<bot nickname>: orignick stegOsaur 1` | Every `<seconds>`, try to change the bot's nick to `<nick>` until it succeeds (e.g. to reclaim a nick held by a ghost). Also settable via the `orignick_nick`/`orignick_interval` keys on `/config`. `orignick off` disables it |
 | `query <sql>` | `<bot nickname>: query SELECT * FROM users` | Run a raw SQL query against the bot's SQLite DB (results in IRC, 10 row cap) |
 | `server <host> [port]` | `<bot nickname>: server irc.libera.chat 6667` | Reconnect to a different IRC server |
 | `addserver <host> [port]` | `<bot nickname>: addserver irc.libera.chat` | Add a server to the DB server list |

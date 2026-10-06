@@ -25,6 +25,7 @@ from flask_socketio import SocketIO, emit, join_room
 
 sys.path.insert(0, '/opt/stegobot')
 import db
+import ollama_tunnel
 import state
 
 socketio = SocketIO(async_mode='threading')
@@ -226,11 +227,24 @@ def _register_routes(app):
         servers      = db.srv_list()
         permbans     = db.permban_all()
         linetriggers = db.linetrigger_list()
+        ai_watchlist = db.ai_watch_list()
+        ollama_defaults = {
+            'ollama_ssh_host':      ollama_tunnel.DEFAULT_SSH_HOST,
+            'ollama_ssh_user':      ollama_tunnel.DEFAULT_SSH_USER,
+            'ollama_ssh_port':      ollama_tunnel.DEFAULT_SSH_PORT,
+            'ollama_remote_port':   ollama_tunnel.DEFAULT_REMOTE_PORT,
+            'ollama_local_port':    ollama_tunnel.DEFAULT_LOCAL_PORT,
+            'ollama_model':         ollama_tunnel.DEFAULT_MODEL,
+            'ollama_lines':         ollama_tunnel.DEFAULT_LINES,
+            'ollama_system_prompt': ollama_tunnel.DEFAULT_SYSTEM_PROMPT,
+            'ollama_query_timeout': ollama_tunnel.DEFAULT_QUERY_TIMEOUT,
+        }
         return render_template('config.html',
                                config=config, users=users,
                                channels=channels, servers=servers,
                                permbans=permbans, global_scope=db.GLOBAL_SCOPE,
-                               linetriggers=linetriggers, all_channels=db.ALL_CHANNELS, msg=msg)
+                               linetriggers=linetriggers, all_channels=db.ALL_CHANNELS,
+                               ollama_defaults=ollama_defaults, ai_watchlist=ai_watchlist, msg=msg)
 
     @app.route('/config/user/add', methods=['POST'])
     @login_required
@@ -372,6 +386,48 @@ def _register_routes(app):
         enabled    = request.form.get('enabled', '') == '1'
         if trigger_id.isdigit():
             db.linetrigger_set_enabled(int(trigger_id), enabled)
+        return redirect(url_for('config_page'))
+
+    # ── AI watchlist ──────────────────────────────────────────────────────
+
+    @app.route('/config/aiwatch/add', methods=['POST'])
+    @login_required
+    def add_aiwatch():
+        hostmask      = request.form.get('hostmask', '').strip()
+        channels      = request.form.get('channels', '').strip()
+        lines         = request.form.get('lines', '').strip()
+        system_prompt = request.form.get('system_prompt', '').strip()
+        if hostmask and system_prompt and lines.isdigit():
+            parts = [c.strip() for c in channels.split(',') if c.strip()]
+            norm  = ','.join(p if p == db.ALL_CHANNELS or p.startswith('#') else f'#{p}' for p in parts)
+            db.ai_watch_add(hostmask, norm, int(lines), system_prompt, session.get('email', ''))
+        return redirect(url_for('config_page'))
+
+    @app.route('/config/aiwatch/update', methods=['POST'])
+    @login_required
+    def update_aiwatch():
+        watch_id      = request.form.get('id', '').strip()
+        lines         = request.form.get('lines', '').strip()
+        system_prompt = request.form.get('system_prompt', '').strip()
+        if watch_id.isdigit() and system_prompt and lines.isdigit():
+            db.ai_watch_update(int(watch_id), int(lines), system_prompt)
+        return redirect(url_for('config_page'))
+
+    @app.route('/config/aiwatch/del', methods=['POST'])
+    @login_required
+    def del_aiwatch():
+        watch_id = request.form.get('id', '').strip()
+        if watch_id.isdigit():
+            db.ai_watch_delete(int(watch_id))
+        return redirect(url_for('config_page'))
+
+    @app.route('/config/aiwatch/toggle', methods=['POST'])
+    @login_required
+    def toggle_aiwatch():
+        watch_id = request.form.get('id', '').strip()
+        enabled  = request.form.get('enabled', '') == '1'
+        if watch_id.isdigit():
+            db.ai_watch_set_enabled(int(watch_id), enabled)
         return redirect(url_for('config_page'))
 
     # ── Database browser ─────────────────────────────────────────────────

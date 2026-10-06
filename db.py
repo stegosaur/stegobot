@@ -99,7 +99,26 @@ def init_schema():
             goal       INTEGER NOT NULL,
             PRIMARY KEY (trigger_id, channel, hostmask)
         );
+
+        CREATE TABLE IF NOT EXISTS ai_watch (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            hostmask      TEXT NOT NULL,
+            channels      TEXT NOT NULL DEFAULT '*',
+            lines         INTEGER,
+            system_prompt TEXT,
+            enabled       INTEGER NOT NULL DEFAULT 1,
+            added_by      TEXT,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
+    # ai_watch predates the per-entry lines/system_prompt columns above — the
+    # CREATE TABLE IF NOT EXISTS is a no-op against an existing older copy, so
+    # add them here if missing rather than losing any rows already in it.
+    ai_watch_cols = {r[1] for r in c.execute("PRAGMA table_info(ai_watch)")}
+    if 'lines' not in ai_watch_cols:
+        c.execute("ALTER TABLE ai_watch ADD COLUMN lines INTEGER")
+    if 'system_prompt' not in ai_watch_cols:
+        c.execute("ALTER TABLE ai_watch ADD COLUMN system_prompt TEXT")
     c.commit()
     c.close()
 
@@ -428,6 +447,56 @@ def linetrigger_bump(row, channel, hostmask):
         lines = [line for line in row['messages'].split('\n') if line.strip()]
         return [random.choice(lines)] if lines else None
     return None
+
+
+# ── AI watchlist (which hostmasks the Ollama auto-trigger responds to) ──────
+
+def ai_watch_add(hostmask, channels, lines, system_prompt, added_by=''):
+    channels = (channels or '').strip() or ALL_CHANNELS
+    _conn().execute(
+        '''INSERT INTO ai_watch(hostmask,channels,lines,system_prompt,added_by)
+           VALUES(?,?,?,?,?)''',
+        (hostmask, channels, lines, system_prompt, added_by))
+    _conn().commit()
+
+
+def ai_watch_update(watch_id, lines, system_prompt):
+    _conn().execute(
+        'UPDATE ai_watch SET lines=?, system_prompt=? WHERE id=?',
+        (lines, system_prompt, watch_id))
+    _conn().commit()
+
+
+def ai_watch_delete(watch_id):
+    _conn().execute('DELETE FROM ai_watch WHERE id=?', (watch_id,))
+    _conn().commit()
+
+
+def ai_watch_set_enabled(watch_id, enabled):
+    _conn().execute('UPDATE ai_watch SET enabled=? WHERE id=?', (1 if enabled else 0, watch_id))
+    _conn().commit()
+
+
+def ai_watch_list():
+    return _conn().execute(
+        '''SELECT id,hostmask,channels,lines,system_prompt,enabled,added_by,created_at
+           FROM ai_watch ORDER BY id''').fetchall()
+
+
+def ai_watch_enabled_for_channel(channel):
+    """All enabled ai_watch entries whose channel scope includes `channel`."""
+    channel = channel.lower()
+    out = []
+    for row in ai_watch_list():
+        if not row['enabled']:
+            continue
+        scope = (row['channels'] or '').strip()
+        if scope and scope != ALL_CHANNELS:
+            chans = {c.strip().lower() for c in scope.split(',') if c.strip()}
+            if channel not in chans:
+                continue
+        out.append(row)
+    return out
 
 
 # ── Arbitrary query (admin command) ─────────────────────────────────────────

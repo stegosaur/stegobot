@@ -204,6 +204,154 @@
   </form>
 </div>
 
+<h2>AI (Ollama)</h2>
+<div class="card">
+  <p style="color:var(--fg2); margin-bottom:.5rem;">
+    How to reach Ollama, shared by both the <code>ollama [nick]</code> command and the
+    automatic AI Watchlist replies below. Queries reach a remote Ollama server over an SSH
+    tunnel opened on demand and closed right after, and always run one at a time in the
+    background so a slow response never blocks the bot — if several trigger at once they're
+    answered in order. Per-user line count and system prompt live on each AI Watchlist entry
+    below, not here — different watched users can get different context.
+  </p>
+  <table>
+    <tbody>
+      <tr>
+        <td style="white-space:nowrap">SSH host</td>
+        <td>
+          <form method="post" class="inline-form" style="margin:0">
+            <input type="hidden" name="action" value="set">
+            <input type="hidden" name="key" value="ollama_ssh_host">
+            <input type="text" name="value" value="{{ config.get('ollama_ssh_host', ollama_defaults.ollama_ssh_host) }}" required>
+            <button class="btn-sm">Save</button>
+          </form>
+        </td>
+      </tr>
+      <tr>
+        <td>SSH user</td>
+        <td>
+          <form method="post" class="inline-form" style="margin:0">
+            <input type="hidden" name="action" value="set">
+            <input type="hidden" name="key" value="ollama_ssh_user">
+            <input type="text" name="value" value="{{ config.get('ollama_ssh_user', ollama_defaults.ollama_ssh_user) }}" required>
+            <button class="btn-sm">Save</button>
+          </form>
+        </td>
+      </tr>
+      <tr>
+        <td>SSH port</td>
+        <td>
+          <form method="post" class="inline-form" style="margin:0">
+            <input type="hidden" name="action" value="set">
+            <input type="hidden" name="key" value="ollama_ssh_port">
+            <input type="number" name="value" value="{{ config.get('ollama_ssh_port', ollama_defaults.ollama_ssh_port) }}" required>
+            <button class="btn-sm">Save</button>
+          </form>
+        </td>
+      </tr>
+      <tr>
+        <td>Remote Ollama port</td>
+        <td>
+          <form method="post" class="inline-form" style="margin:0">
+            <input type="hidden" name="action" value="set">
+            <input type="hidden" name="key" value="ollama_remote_port">
+            <input type="number" name="value" value="{{ config.get('ollama_remote_port', ollama_defaults.ollama_remote_port) }}" required>
+            <button class="btn-sm">Save</button>
+          </form>
+        </td>
+      </tr>
+      <tr>
+        <td>Local tunnel port</td>
+        <td>
+          <form method="post" class="inline-form" style="margin:0">
+            <input type="hidden" name="action" value="set">
+            <input type="hidden" name="key" value="ollama_local_port">
+            <input type="number" name="value" value="{{ config.get('ollama_local_port', ollama_defaults.ollama_local_port) }}" required>
+            <button class="btn-sm">Save</button>
+          </form>
+        </td>
+      </tr>
+      <tr>
+        <td>Model</td>
+        <td>
+          <form method="post" class="inline-form" style="margin:0">
+            <input type="hidden" name="action" value="set">
+            <input type="hidden" name="key" value="ollama_model">
+            <input type="text" name="value" value="{{ config.get('ollama_model', ollama_defaults.ollama_model) }}" required>
+            <button class="btn-sm">Save</button>
+          </form>
+        </td>
+      </tr>
+      <tr>
+        <td>Query timeout (sec)</td>
+        <td>
+          <form method="post" class="inline-form" style="margin:0">
+            <input type="hidden" name="action" value="set">
+            <input type="hidden" name="key" value="ollama_query_timeout">
+            <input type="number" name="value" value="{{ config.get('ollama_query_timeout', ollama_defaults.ollama_query_timeout) }}" required>
+            <button class="btn-sm">Save</button>
+          </form>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h2>AI Watchlist</h2>
+<div class="card">
+  <p style="color:var(--fg2); margin-bottom:.5rem;">
+    The bot only replies automatically (no command needed) to users whose hostmask matches an
+    entry below — each entry has its own line count and system prompt, since different watched
+    users can warrant different framing. Once a matching user has said <b>Lines</b> lines in a
+    matching channel, the bot asks Ollama to respond based on just those lines (using that
+    entry's <b>System prompt</b> for context) and starts counting again from zero. Hostmask
+    supports <code>*</code> wildcards, e.g. <code>*!*@some.host</code> matches any nick from
+    that host.
+  </p>
+  <table>
+    <thead><tr><th>Hostmask</th><th>Channels</th><th>Lines</th><th>System prompt</th><th>Status</th><th>Added by</th><th></th></tr></thead>
+    <tbody>
+    {% for w in ai_watchlist %}
+    <tr>
+      <td><code>{{ w.hostmask }}</code></td>
+      <td>{{ 'All channels' if w.channels == all_channels else w.channels }}</td>
+      <td colspan="2">
+        <form method="post" action="{{ url_for('update_aiwatch') }}" class="inline-form" style="margin:0">
+          <input type="hidden" name="id" value="{{ w.id }}">
+          <input type="number" name="lines" value="{{ w.lines or ollama_defaults.ollama_lines }}" min="1" required style="width:70px">
+          <textarea name="system_prompt" rows="2" style="flex:1" required>{{ w.system_prompt or ollama_defaults.ollama_system_prompt }}</textarea>
+          <button class="btn-sm" style="align-self:flex-start">Save</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="{{ url_for('toggle_aiwatch') }}" style="display:inline; margin:0">
+          <input type="hidden" name="id" value="{{ w.id }}">
+          <input type="hidden" name="enabled" value="{{ '0' if w.enabled else '1' }}">
+          <button class="btn-sm {{ '' if w.enabled else 'btn-danger' }}">{{ 'Enabled' if w.enabled else 'Disabled' }}</button>
+        </form>
+      </td>
+      <td>{{ w.added_by or '' }}</td>
+      <td>
+        <form method="post" action="{{ url_for('del_aiwatch') }}" style="display:inline">
+          <input type="hidden" name="id" value="{{ w.id }}">
+          <button class="btn-danger btn-sm">✕</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <form method="post" action="{{ url_for('add_aiwatch') }}" class="stack-form">
+    <div class="inline-form">
+      <input type="text" name="hostmask" placeholder="nick!ident@host.com (wildcards ok, e.g. *!*@some.host)" required style="flex:2">
+      <input type="text" name="channels" placeholder="#chan1,#chan2 (blank = all channels)" style="flex:1">
+      <input type="number" name="lines" placeholder="lines" value="{{ ollama_defaults.ollama_lines }}" min="1" required style="width:90px">
+    </div>
+    <textarea name="system_prompt" placeholder="System prompt for this user" rows="2" required>{{ ollama_defaults.ollama_system_prompt }}</textarea>
+    <button style="align-self:flex-start">Add watch</button>
+  </form>
+</div>
+
 <h2>Servers</h2>
 <div class="card">
   <table>

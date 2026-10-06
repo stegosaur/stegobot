@@ -2,6 +2,7 @@
 """Entry point — starts the IRC bot and web server in parallel threads."""
 
 import logging
+import signal
 import sys
 import threading
 
@@ -20,6 +21,19 @@ def main():
 
     bot = StegoBot()
     state.bot_instance = bot
+
+    # Without this, systemd's plain SIGTERM (every `systemctl restart`/`stop`)
+    # kills the process with no IRC QUIT ever sent — the server has no idea
+    # we're gone until its own ping-timeout fires, sometimes minutes later,
+    # and until then our nick is a "ghost" that a fresh connect() collides
+    # with. A network-wide-nick network (this bot runs on EFnet) makes that
+    # collision visible on every server, not just the one we were on.
+    def _handle_term(signum, frame):
+        bot.should_stop = True
+        bot.disconnect('Restarting')
+
+    signal.signal(signal.SIGTERM, _handle_term)
+    signal.signal(signal.SIGINT, _handle_term)
 
     # Start web server in a daemon thread
     from web.app import create_app, socketio

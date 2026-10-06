@@ -12,6 +12,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+import ai_watch
 import db
 import plugin_loader
 import state
@@ -106,6 +107,23 @@ class StegoBot:
 
         self._config_ts = 0
         self._motd_buf = []
+        self._welcomed = False  # True once 001 arrives; gates the pre-login altNick fallback
+
+        # orignick: periodically try to reclaim a desired nick (config keys
+        # orignick_nick / orignick_interval, or the `orignick` command).
+        self._last_orignick_attempt = 0
+        # Autojoin sweep: every 30s, (re)join any db channel we're not
+        # currently sitting in — covers kicks, since those no longer remove
+        # the channel from the db (see _on_kick). Per-channel next-attempt
+        # time and consecutive-failure count, so a channel that never lets us
+        # back in (banned, or juped on this particular server) backs off
+        # instead of being hammered every 30s forever — that flavor of retry
+        # is exactly what got the bot K-lined from a server for "attempting
+        # to join too many juped channels" once. Reset per-connection since
+        # jupes/bans are often server-local, not network-wide.
+        self._last_autojoin_check = 0
+        self._autojoin_next_try = {}
+        self._autojoin_fails = {}
 
         handlers = [
             ('welcome',       self._on_welcome),
@@ -182,6 +200,9 @@ class StegoBot:
         if port is None:
             port = 6667
         self._manual_disconnect = False
+        self._welcomed = False
+        self._autojoin_next_try = {}
+        self._autojoin_fails = {}
         self.nick     = db.cfg_get('nick', 'stegobot')
         username      = db.cfg_get('username', 'stegobot')
         realname      = db.cfg_get('realname', 'stegobot')
@@ -225,6 +246,64 @@ class StegoBot:
                 self.disconnect('Server change requested')
                 time.sleep(2)
                 self.connect(host, port)
+
+            # Gated on _welcomed, not just is_connected() — the socket reports
+            # "connected" well before registration (NICK/USER + 001) finishes,
+            # and firing these mid-handshake means they race the login nick
+            # negotiation: a stray NICK from _check_orignick here previously
+            # got misread as part of that negotiation and corrupted self.nick
+            # after a reconnect, even though the login nick itself was fine.
+            if self._conn and self._conn.is_connected() and self._welcomed:
+                now = time.time()
+                if now - self._last_autojoin_check >= 30:
+                    self._last_autojoin_check = now
+                    self._check_autojoin()
+                self._check_orignick()
+
+    def _check_autojoin(self):
+        """(Re)join every channel in the db that we're not currently sitting
+        in. Runs every 30s from run(). Every joined channel is an autojoin
+        channel — the only way to stop this is `leave <#channel>`, which
+        removes it from the db.
+
+        Backs off per-channel on repeated failure instead of retrying every
+        30s forever: a channel we're banned from, or that's juped on this
+        particular server, will never let us back in, and hammering a JOIN
+        at a fixed 30s cadence indefinitely is what got the bot K-lined once
+        already ("Attempting to join too many Juped Channels")."""
+        my_nick = self.nick.lower()
+        now = time.time()
+        for chan in db.chan_list():
+            if my_nick in self.channel_users.get(chan, {}):
+                self._autojoin_fails.pop(chan, None)
+                self._autojoin_next_try.pop(chan, None)
+                continue
+            if now < self._autojoin_next_try.get(chan, 0):
+                continue
+            fails = self._autojoin_fails.get(chan, 0)
+            # 30s cadence for the first ~5min of retries (covers the common
+            # case: kicked, or briefly banned); beyond that, back off up to
+            # once every 10min so a permanently-blocked channel stays quiet.
+            backoff = min(fails, 20) * 30
+            self._autojoin_next_try[chan] = now + 30 + backoff
+            self._autojoin_fails[chan] = fails + 1
+            self._conn.join(chan)
+
+    def _check_orignick(self):
+        """If orignick_nick is configured and we're not already using it, try
+        to reclaim it every orignick_interval seconds (default 30)."""
+        target = db.cfg_get('orignick_nick')
+        if not target or self.nick == target:
+            return
+        try:
+            interval = max(1, int(db.cfg_get('orignick_interval', 30)))
+        except (TypeError, ValueError):
+            interval = 30
+        now = time.time()
+        if now - self._last_orignick_attempt < interval:
+            return
+        self._last_orignick_attempt = now
+        self._conn.nick(target)
 
     def _safe_privmsg(self, target, text):
         if self._conn and self._conn.is_connected():
@@ -313,9 +392,21 @@ class StegoBot:
                 for line in msgs:
                     self._safe_privmsg(channel, line)
 
+    def _check_ai_watch(self, channel, nick, hostmask, text):
+        """Feed the line to ai_watch if the sender's hostmask matches an enabled
+        AI-watch entry scoped to this channel. ai_watch owns the buffering/
+        threshold/queueing logic (see that module); only the first matching
+        entry counts, so one user isn't double-buffered by overlapping rules."""
+        for row in db.ai_watch_enabled_for_channel(channel):
+            if fnmatch.fnmatch(hostmask.lower(), row['hostmask'].lower()):
+                ai_watch.on_line(channel, nick, hostmask, text,
+                                 limit=row['lines'], system_prompt=row['system_prompt'])
+                return
+
     # ── IRC event handlers ────────────────────────────────────────────────────
 
     def _on_welcome(self, c, e):
+        self._welcomed = True
         server = e.source or 'server'
         _push('*status*', {'type': 'connect', 'nick': '', 'text': f'Connected to {server}', 'timestamp': _now()})
         for chan in db.chan_list():
@@ -335,6 +426,7 @@ class StegoBot:
             return
 
         self._check_line_triggers(channel, hm)
+        self._check_ai_watch(channel, nick, hm, text)
 
         prefix = self.nick + ':'
         if text.lower().startswith(prefix.lower()):
@@ -437,12 +529,9 @@ class StegoBot:
         _push(channel, {'type': 'kick', 'nick': kicker, 'hostmask': km,
                          'kicked': kicked, 'reason': reason, 'channel': channel,
                          'self': is_self, 'text': text, 'timestamp': _now()})
-        if is_self:
-            # Mirror _on_part's own-nick handling — otherwise the channel stays
-            # marked "joined" in the db (config page, auto-rejoin on reconnect)
-            # even though we're not in it anymore. The tab itself stays open
-            # (see terminal.js) so the kick message above remains visible.
-            db.chan_remove(channel)
+        # Unlike _on_part, a kick does NOT remove the channel from the db —
+        # it stays an autojoin channel and _check_autojoin retries it every
+        # 30s. Only an explicit `leave <#channel>` closes it for good.
         self._emit_names(channel)
 
     def _on_nick_change(self, c, e):
@@ -628,16 +717,30 @@ class StegoBot:
                             'text': text, 'timestamp': _now()})
 
     def _on_nick_in_use(self, c, e):
+        """Handle 433 (ERR_NICKNAMEINUSE). Only fall back to altNick during the
+        pre-welcome login handshake — self.nick must always reflect our actual
+        confirmed nick (see _on_nick_change), so a *later* failed nick change
+        (a manual `nick` command, orignick, etc.) must NOT touch self.nick;
+        the requested nick simply stays unavailable and we keep our current one.
+
+        If altNick is ALSO taken pre-welcome, we deliberately stop sending
+        more NICK attempts rather than trying yet another candidate — firing
+        NICK repeatedly in a tight loop during registration is exactly what
+        got one connection attempt killed by the server's own flood/timeout
+        protection before it ever completed. Most ircds enforce a
+        registration timeout regardless, so worst case the server disconnects
+        us and _on_disconnect's normal retry-next-server cycle takes over."""
         requested = e.arguments[0] if e.arguments else '?'
-        alt = db.cfg_get('altNick', 'steg0bot')
-        if self.nick != alt:
-            self.nick = alt
-            c.nick(alt)
-            _push('*status*', {'type': 'error', 'nick': '', 'timestamp': _now(),
-                                'text': f'Nick {requested} in use, trying {alt}'})
-        else:
-            _push('*status*', {'type': 'error', 'nick': '', 'timestamp': _now(),
-                                'text': f'Nick {requested} is already in use'})
+        if not self._welcomed:
+            alt = db.cfg_get('altNick', 'steg0bot')
+            if self.nick != alt:
+                self.nick = alt
+                c.nick(alt)
+                _push('*status*', {'type': 'error', 'nick': '', 'timestamp': _now(),
+                                    'text': f'Nick {requested} in use, trying {alt}'})
+                return
+        _push('*status*', {'type': 'error', 'nick': '', 'timestamp': _now(),
+                            'text': f'Nick {requested} is already in use'})
 
     def _on_disconnect(self, c, e):
         if c is not self._conn:
@@ -695,7 +798,13 @@ class StegoBot:
             return
 
         if cmd == 'leave':
-            chan = channel if public else (parts[1] if len(parts) >= 2 else None)
+            # An explicit #channel argument works both in-channel and in PM
+            # (e.g. `<bot>: leave #channel`); with no argument, in-channel
+            # defaults to the current channel and PM requires one.
+            if len(parts) >= 2 and parts[1].startswith('#'):
+                chan = parts[1].lower()
+            else:
+                chan = channel if public else None
             if chan:
                 c.part(chan)
                 db.chan_remove(chan)
@@ -768,6 +877,22 @@ class StegoBot:
             new_nick = parts[1]
             c.nick(new_nick)
             db.cfg_set('nick', new_nick)
+            return
+
+        if cmd == 'orignick':
+            toks = args.split()
+            if len(toks) >= 2 and toks[1].isdigit():
+                target_nick, seconds = toks[0], max(1, int(toks[1]))
+                db.cfg_set('orignick_nick', target_nick)
+                db.cfg_set('orignick_interval', seconds)
+                self._last_orignick_attempt = 0
+                self._safe_privmsg(reply, f'Will try to reclaim nick {target_nick} every {seconds}s')
+            elif len(toks) == 1 and toks[0].lower() in ('off', 'stop', 'disable'):
+                db.cfg_delete('orignick_nick')
+                db.cfg_delete('orignick_interval')
+                self._safe_privmsg(reply, 'orignick disabled')
+            else:
+                self._safe_privmsg(reply, 'Usage: orignick <nick> <seconds> | orignick off')
             return
 
         if cmd == 'query' and len(parts) >= 2:
